@@ -11,9 +11,9 @@ public class SVGExporter {
         let roomW = max(b.max.x - b.min.x, 1.0)
         let roomD = max(b.max.z - b.min.z, 1.0)
         
-        // Scale meters to SVG pixels (1 meter = 100 pixels)
-        let ppm: Float = 100.0
-        let padM: Float = 1.0
+        // Scale meters to SVG pixels (1 meter = 120 pixels)
+        let ppm: Float = 120.0
+        let padM: Float = 1.2
         let svgW = (roomW + padM * 2) * ppm
         let svgH = (roomD + padM * 2) * ppm
         
@@ -34,17 +34,20 @@ public class SVGExporter {
         svg += """
         <defs>
           <style>
-            .grid { stroke: #E2E8F0; stroke-width: 1; }
-            .floor { fill: #F8FAFC; }
-            .wall { stroke: #0F172A; stroke-width: 14; stroke-linecap: square; fill: none; }
-            .door-leaf { stroke: #2563EB; stroke-width: 3; fill: none; }
-            .door-arc { stroke: #3B82F6; stroke-width: 1.5; stroke-dasharray: 4,4; fill: none; }
-            .window { stroke: #0284C7; stroke-width: 6; fill: none; }
+            .grid { stroke: #F1F5F9; stroke-width: 1; }
+            .floor { fill: #F8FAFC; stroke: #E2E8F0; stroke-width: 1; }
+            .wall { stroke: #0F172A; stroke-width: 12; stroke-linecap: square; fill: none; }
+            .door-leaf { stroke: #2563EB; stroke-width: 2.5; fill: none; }
+            .door-arc { stroke: #3B82F6; stroke-width: 1.5; stroke-dasharray: 4,3; fill: none; }
+            .window { stroke: #0284C7; stroke-width: 5; fill: none; }
             .furniture { fill: #EFF6FF; stroke: #3B82F6; stroke-width: 1.5; rx: 4px; }
-            .dimension-line { stroke: #64748B; stroke-width: 1.5; fill: none; }
-            .dimension-text { font-family: -apple-system, system-ui, sans-serif; font-size: 13px; font-weight: bold; fill: #475569; text-anchor: middle; }
-            .title-text { font-family: -apple-system, system-ui, sans-serif; font-size: 18px; font-weight: bold; fill: #0F172A; }
-            .subtitle-text { font-family: -apple-system, system-ui, sans-serif; font-size: 12px; fill: #64748B; }
+            .dimension-line { stroke: #64748B; stroke-width: 1.2; fill: none; }
+            .dimension-tick { stroke: #64748B; stroke-width: 1.2; }
+            .dimension-pill { fill: #FFFFFF; stroke: #CBD5E1; stroke-width: 1; rx: 4px; }
+            .wall-dim-text { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; font-weight: bold; fill: #1E293B; text-anchor: middle; dominant-baseline: middle; }
+            .opening-dim-text { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 9px; font-weight: 600; fill: #2563EB; text-anchor: middle; dominant-baseline: middle; }
+            .title-text { font-family: -apple-system, system-ui, sans-serif; font-size: 20px; font-weight: bold; fill: #0F172A; }
+            .subtitle-text { font-family: -apple-system, system-ui, sans-serif; font-size: 11px; fill: #64748B; }
           </style>
         </defs>
         
@@ -60,6 +63,13 @@ public class SVGExporter {
         for gy in stride(from: 0, to: svgH, by: ppm) {
             svg += "  <line x1=\"0\" y1=\"\(gy)\" x2=\"\(svgW)\" y2=\"\(gy)\" class=\"grid\"/>\n"
         }
+        
+        // Floor fill
+        let fl1 = toSVG(b.min.x, b.min.z)
+        let fl2 = toSVG(b.max.x, b.min.z)
+        let fl3 = toSVG(b.max.x, b.max.z)
+        let fl4 = toSVG(b.min.x, b.max.z)
+        svg += "  <polygon points=\"\(fl1.x),\(fl1.y) \(fl2.x),\(fl2.y) \(fl3.x),\(fl3.y) \(fl4.x),\(fl4.y)\" class=\"floor\"/>\n"
         svg += "</g>\n\n"
         
         // 2. Furniture Layer
@@ -72,7 +82,7 @@ public class SVGExporter {
             
             svg += "  <g transform=\"translate(\(center.x), \(center.y)) rotate(\(rotDeg))\">\n"
             svg += "    <rect x=\"\(-w/2)\" y=\"\(-d/2)\" width=\"\(w)\" height=\"\(d)\" class=\"furniture\"/>\n"
-            svg += "    <text x=\"0\" y=\"4\" font-family=\"sans-serif\" font-size=\"10\" fill=\"#3B82F6\" text-anchor=\"middle\">\(obj.displayName)</text>\n"
+            svg += "    <text x=\"0\" y=\"3\" font-family=\"sans-serif\" font-size=\"10\" font-weight=\"500\" fill=\"#2563EB\" text-anchor=\"middle\">\(obj.displayName)</text>\n"
             svg += "  </g>\n"
         }
         svg += "</g>\n\n"
@@ -94,6 +104,10 @@ public class SVGExporter {
             let p1 = toSVG(win.position.x - halfW*cos(rot), win.position.z - halfW*sin(rot))
             let p2 = toSVG(win.position.x + halfW*cos(rot), win.position.z + halfW*sin(rot))
             svg += "  <line x1=\"\(p1.x)\" y1=\"\(p1.y)\" x2=\"\(p2.x)\" y2=\"\(p2.y)\" class=\"window\"/>\n"
+            
+            let center = toSVG(win.position.x, win.position.z)
+            let winText = String(format: "%.2fm", win.width)
+            svg += "  <text x=\"\(center.x)\" y=\"\(center.y - 8)\" class=\"opening-dim-text\">\(winText)</text>\n"
         }
         svg += "</g>\n\n"
         
@@ -111,30 +125,62 @@ public class SVGExporter {
             
             svg += "  <line x1=\"\(h.x)\" y1=\"\(h.y)\" x2=\"\(arcEndX)\" y2=\"\(arcEndY)\" class=\"door-leaf\"/>\n"
             svg += "  <path d=\"M \(h.x + w * cos(rot)) \(h.y + w * sin(rot)) A \(w) \(w) 0 0 1 \(arcEndX) \(arcEndY)\" class=\"door-arc\"/>\n"
+            
+            let center = toSVG(pos.x, pos.z)
+            let doorText = String(format: "Door: %.2fm", door.width)
+            svg += "  <text x=\"\(center.x)\" y=\"\(center.y - 12)\" class=\"opening-dim-text\">\(doorText)</text>\n"
         }
         svg += "</g>\n\n"
         
-        // 6. Dimensions Layer
+        // 6. Dimensions Layer (Per-Wall Measurements + Overall Bounding Chains)
         svg += "<g id=\"dimensions\">\n"
-        let dTop = toSVG(b.min.x, b.min.z - 0.4)
-        let dTopEnd = toSVG(b.max.x, b.min.z - 0.4)
-        svg += "  <line x1=\"\(dTop.x)\" y1=\"\(dTop.y)\" x2=\"\(dTopEnd.x)\" y2=\"\(dTopEnd.y)\" class=\"dimension-line\"/>\n"
-        svg += "  <line x1=\"\(dTop.x)\" y1=\"\(dTop.y - 6)\" x2=\"\(dTop.x)\" y2=\"\(dTop.y + 6)\" class=\"dimension-line\"/>\n"
-        svg += "  <line x1=\"\(dTopEnd.x)\" y1=\"\(dTopEnd.y - 6)\" x2=\"\(dTopEnd.x)\" y2=\"\(dTopEnd.y + 6)\" class=\"dimension-line\"/>\n"
-        svg += "  <text x=\"\((dTop.x + dTopEnd.x)/2)\" y=\"\(dTop.y - 10)\" class=\"dimension-text\">\(String(format: "%.2f m", room.roomWidth))</text>\n"
         
-        let dRight = toSVG(b.max.x + 0.4, b.min.z)
-        let dRightEnd = toSVG(b.max.x + 0.4, b.max.z)
+        // A. Per-Wall Measurement Badges
+        for wall in room.walls {
+            let p1 = toSVG(Float(wall.startPoint2D.x), Float(wall.startPoint2D.y))
+            let p2 = toSVG(Float(wall.endPoint2D.x), Float(wall.endPoint2D.y))
+            let dx = p2.x - p1.x
+            let dy = p2.y - p1.y
+            let segLen = sqrt(dx*dx + dy*dy)
+            
+            if segLen > 30 {
+                let midX = (p1.x + p2.x) / 2.0
+                let midY = (p1.y + p2.y) / 2.0
+                let normalX = -dy / segLen
+                let normalY = dx / segLen
+                let offsetDist: Float = 18.0
+                let lx = midX + normalX * offsetDist
+                let ly = midY + normalY * offsetDist
+                
+                let dimStr = String(format: "%.2f m", wall.length)
+                let pillW: Float = 56.0
+                let pillH: Float = 18.0
+                
+                svg += "  <rect x=\"\(lx - pillW/2)\" y=\"\(ly - pillH/2)\" width=\"\(pillW)\" height=\"\(pillH)\" class=\"dimension-pill\"/>\n"
+                svg += "  <text x=\"\(lx)\" y=\"\(ly)\" class=\"wall-dim-text\">\(dimStr)</text>\n"
+            }
+        }
+        
+        // B. Overall Bounding Dimensions
+        let dTop = toSVG(b.min.x, b.min.z - 0.45)
+        let dTopEnd = toSVG(b.max.x, b.min.z - 0.45)
+        svg += "  <line x1=\"\(dTop.x)\" y1=\"\(dTop.y)\" x2=\"\(dTopEnd.x)\" y2=\"\(dTopEnd.y)\" class=\"dimension-line\"/>\n"
+        svg += "  <line x1=\"\(dTop.x)\" y1=\"\(dTop.y - 6)\" x2=\"\(dTop.x)\" y2=\"\(dTop.y + 6)\" class=\"dimension-tick\"/>\n"
+        svg += "  <line x1=\"\(dTopEnd.x)\" y1=\"\(dTopEnd.y - 6)\" x2=\"\(dTopEnd.x)\" y2=\"\(dTopEnd.y + 6)\" class=\"dimension-tick\"/>\n"
+        svg += "  <text x=\"\((dTop.x + dTopEnd.x)/2)\" y=\"\(dTop.y - 10)\" class=\"wall-dim-text\">OVERALL WIDTH: \(String(format: "%.2f m", room.roomWidth))</text>\n"
+        
+        let dRight = toSVG(b.max.x + 0.45, b.min.z)
+        let dRightEnd = toSVG(b.max.x + 0.45, b.max.z)
         svg += "  <line x1=\"\(dRight.x)\" y1=\"\(dRight.y)\" x2=\"\(dRightEnd.x)\" y2=\"\(dRightEnd.y)\" class=\"dimension-line\"/>\n"
-        svg += "  <line x1=\"\(dRight.x - 6)\" y1=\"\(dRight.y)\" x2=\"\(dRight.x + 6)\" y2=\"\(dRight.y)\" class=\"dimension-line\"/>\n"
-        svg += "  <line x1=\"\(dRightEnd.x - 6)\" y1=\"\(dRightEnd.y)\" x2=\"\(dRightEnd.x + 6)\" y2=\"\(dRightEnd.y)\" class=\"dimension-line\"/>\n"
-        svg += "  <text x=\"\(dRight.x + 25)\" y=\"\((dRight.y + dRightEnd.y)/2)\" class=\"dimension-text\" transform=\"rotate(90, \(dRight.x + 25), \((dRight.y + dRightEnd.y)/2))\">\(String(format: "%.2f m", room.roomDepth))</text>\n"
+        svg += "  <line x1=\"\(dRight.x - 6)\" y1=\"\(dRight.y)\" x2=\"\(dRight.x + 6)\" y2=\"\(dRight.y)\" class=\"dimension-tick\"/>\n"
+        svg += "  <line x1=\"\(dRightEnd.x - 6)\" y1=\"\(dRightEnd.y)\" x2=\"\(dRightEnd.x + 6)\" y2=\"\(dRightEnd.y)\" class=\"dimension-tick\"/>\n"
+        svg += "  <text x=\"\(dRight.x + 28)\" y=\"\((dRight.y + dRightEnd.y)/2)\" class=\"wall-dim-text\" transform=\"rotate(90, \(dRight.x + 28), \((dRight.y + dRightEnd.y)/2))\">OVERALL DEPTH: \(String(format: "%.2f m", room.roomDepth))</text>\n"
         svg += "</g>\n\n"
         
         // 7. Title Block
-        svg += "<g id=\"title-block\" transform=\"translate(30, 40)\">\n"
-        svg += "  <text x=\"0\" y=\"0\" class=\"title-text\">\(room.name)</text>\n"
-        svg += "  <text x=\"0\" y=\"20\" class=\"subtitle-text\">Area: \(room.formattedAreaMetric) (\(room.formattedAreaImperial)) • Generated by RoomMaquette iOS</text>\n"
+        svg += "<g id=\"title-block\" transform=\"translate(35, 45)\">\n"
+        svg += "  <text x=\"0\" y=\"0\" class=\"title-text\">\(room.name.uppercased())</text>\n"
+        svg += "  <text x=\"0\" y=\"22\" class=\"subtitle-text\">Floor Area: \(room.formattedAreaMetric) (\(room.formattedAreaImperial)) • Walls: \(room.walls.count) • Scale: 1:50 • Generated by RoomMaquette iOS</text>\n"
         svg += "</g>\n"
         
         svg += "</svg>\n"

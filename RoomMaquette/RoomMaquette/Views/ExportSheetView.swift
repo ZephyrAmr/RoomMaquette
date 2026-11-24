@@ -1,15 +1,16 @@
 import SwiftUI
+import QuickLook
 
 public struct ExportSheetView: View {
     public var room: MaquetteRoom
     @Environment(\.dismiss) private var dismiss
     
-    @State private var selectedFormat: ExportFormat = .usdz
+    @State private var selectedFormat: ExportFormat = .pdf
     @State private var selectedStyle: MaquetteStyle = .architecturalClay
     @State private var isExporting: Bool = false
     @State private var exportedURLs: [URL]? = nil
+    @State private var previewURL: URL? = nil
     @State private var errorMessage: String? = nil
-    @State private var showShareSheet: Bool = false
     
     public init(room: MaquetteRoom) {
         self.room = room
@@ -18,25 +19,94 @@ public struct ExportSheetView: View {
     public var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     
                     // Room summary header
                     HStack(spacing: 16) {
                         Image(systemName: "cube.transparent.fill")
-                            .font(.system(size: 36))
+                            .font(.system(size: 34))
                             .foregroundColor(.blue)
                         
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(room.name)
                                 .font(.headline)
-                            Text("\(room.formattedAreaMetric) (\(room.formattedAreaImperial)) • \(room.walls.count) Walls • \(room.objects.count) Objects")
+                            Text("\(room.formattedAreaMetric) (\(room.formattedAreaImperial)) • \(room.walls.count) Walls • \(room.objects.count) Items")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
                     }
                     .padding()
-                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                    
+                    // Success Result Banner if exported
+                    if let urls = exportedURLs, let mainURL = urls.first {
+                        VStack(spacing: 12) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(.green)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Export Successful!")
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.primary)
+                                    Text(mainURL.lastPathComponent)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer()
+                                
+                                Text(formattedFileSize(url: mainURL))
+                                    .font(.caption2)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.green.opacity(0.15), in: Capsule())
+                                    .foregroundColor(.green)
+                            }
+                            
+                            HStack(spacing: 10) {
+                                // Share / Save Button
+                                Button {
+                                    ShareSheetHelper.present(items: urls)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "square.and.arrow.up.fill")
+                                        Text("Share / Save File")
+                                    }
+                                    .font(.system(size: 13, weight: .bold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 10))
+                                    .foregroundColor(.white)
+                                }
+                                
+                                // Preview / Quick Look Button
+                                Button {
+                                    previewURL = mainURL
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "eye.fill")
+                                        Text("Preview")
+                                    }
+                                    .font(.system(size: 13, weight: .bold))
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 10))
+                                    .foregroundColor(.primary)
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                        )
+                    }
                     
                     // Format Selection Section
                     VStack(alignment: .leading, spacing: 12) {
@@ -45,9 +115,25 @@ public struct ExportSheetView: View {
                             .fontWeight(.bold)
                             .foregroundColor(.secondary)
                         
-                        // 3D Formats Group
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("3D Model Formats", systemImage: "cube.fill")
+                        // 2D Architectural Formats (Primary for Plans & Blueprints)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("2D Floor Plans & Blueprints", systemImage: "doc.richtext.fill")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                            
+                            formatRow(for: .pdf)
+                            formatRow(for: .png)
+                            formatRow(for: .svg)
+                            formatRow(for: .dxf)
+                        }
+                        
+                        Divider()
+                            .padding(.vertical, 4)
+                        
+                        // 3D Model Formats
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("3D Models & Maquettes", systemImage: "cube.fill")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.primary)
@@ -56,29 +142,13 @@ public struct ExportSheetView: View {
                             formatRow(for: .obj)
                             formatRow(for: .stl)
                             formatRow(for: .gltf)
-                            formatRow(for: .dxf)
-                        }
-                        
-                        Divider()
-                            .padding(.vertical, 4)
-                        
-                        // 2D Formats Group
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("2D Vector & Drawing Formats", systemImage: "doc.text.image.fill")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                            
-                            formatRow(for: .pdf)
-                            formatRow(for: .svg)
-                            formatRow(for: .png)
                         }
                     }
                     .padding()
-                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
                     
-                    // Aesthetic Style for USDZ / PNG
-                    if selectedFormat == .usdz || selectedFormat == .png {
+                    // Aesthetic Style for USDZ / 3D
+                    if selectedFormat == .usdz {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("MAQUETTE MATERIAL STYLE")
                                 .font(.caption)
@@ -93,7 +163,7 @@ public struct ExportSheetView: View {
                             .pickerStyle(.segmented)
                         }
                         .padding()
-                        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
                     }
                     
                     // Selected Format Info Box
@@ -118,12 +188,19 @@ public struct ExportSheetView: View {
                             .foregroundColor(.secondary)
                     }
                     .padding()
-                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
                     
                     if let err = errorMessage {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundColor(.red)
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text(err)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                     }
                     
                     // Action Button
@@ -143,7 +220,7 @@ public struct ExportSheetView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 12))
+                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 14))
                         .foregroundColor(.white)
                     }
                     .disabled(isExporting)
@@ -160,11 +237,7 @@ public struct ExportSheetView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showShareSheet) {
-                if let urls = exportedURLs {
-                    ShareSheet(items: urls)
-                }
-            }
+            .quickLookPreview($previewURL)
         }
     }
     
@@ -175,13 +248,13 @@ public struct ExportSheetView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: format.icon)
-                    .font(.system(size: 16))
+                    .font(.system(size: 15))
                     .foregroundColor(selectedFormat == format ? .blue : .secondary)
                     .frame(width: 24)
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(format.rawValue)
-                        .font(.system(size: 14, weight: selectedFormat == format ? .semibold : .regular))
+                        .font(.system(size: 13.5, weight: selectedFormat == format ? .semibold : .regular))
                         .foregroundColor(.primary)
                 }
                 
@@ -192,16 +265,17 @@ public struct ExportSheetView: View {
                         .foregroundColor(.blue)
                 } else {
                     Image(systemName: "circle")
-                        .foregroundColor(.secondary.opacity(0.4))
+                        .foregroundColor(.secondary.opacity(0.35))
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
         }
     }
     
     private func performExport() {
         isExporting = true
         errorMessage = nil
+        exportedURLs = nil
         
         DispatchQueue.global(qos: .userInitiated).async {
             do {
@@ -209,7 +283,9 @@ public struct ExportSheetView: View {
                 DispatchQueue.main.async {
                     self.exportedURLs = urls
                     self.isExporting = false
-                    self.showShareSheet = true
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    // Present native share sheet safely
+                    ShareSheetHelper.present(items: urls)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -218,5 +294,16 @@ public struct ExportSheetView: View {
                 }
             }
         }
+    }
+    
+    private func formattedFileSize(url: URL) -> String {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int64 else {
+            return ""
+        }
+        let bcf = ByteCountFormatter()
+        bcf.allowedUnits = [.useKB, .useMB]
+        bcf.countStyle = .file
+        return bcf.string(fromByteCount: size)
     }
 }

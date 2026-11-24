@@ -157,9 +157,30 @@ public struct FloorPlan2DCanvas: View {
                         )
                         
                         // Walls, Doors, Windows
-                        drawWalls(context: &context, walls: room.walls, toCanvas: toCanvasPoint, currentScale: currentScale)
-                        drawDoors(context: &context, doors: room.doors, toCanvas: toCanvasPoint, currentScale: currentScale)
-                        drawWindows(context: &context, windows: room.windows, toCanvas: toCanvasPoint, currentScale: currentScale)
+                        drawWalls(
+                            context: &context,
+                            walls: room.walls,
+                            selectedId: selectedObjectId,
+                            showDimensions: showDimensions,
+                            toCanvas: toCanvasPoint,
+                            currentScale: currentScale
+                        )
+                        drawDoors(
+                            context: &context,
+                            doors: room.doors,
+                            selectedId: selectedObjectId,
+                            showDimensions: showDimensions,
+                            toCanvas: toCanvasPoint,
+                            currentScale: currentScale
+                        )
+                        drawWindows(
+                            context: &context,
+                            windows: room.windows,
+                            selectedId: selectedObjectId,
+                            showDimensions: showDimensions,
+                            toCanvas: toCanvasPoint,
+                            currentScale: currentScale
+                        )
                         
                         // Dimension Lines
                         if showDimensions {
@@ -290,7 +311,7 @@ public struct FloorPlan2DCanvas: View {
         
         let roomPt = SIMD3<Float>(rx, 0, rz)
         
-        // Check furniture object hits
+        // 1. Check furniture object hits
         for obj in room.objects {
             let dx = roomPt.x - obj.position.x
             let dz = roomPt.z - obj.position.z
@@ -309,6 +330,50 @@ public struct FloorPlan2DCanvas: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 onSelectObject?(obj.id)
                 return
+            }
+        }
+        
+        // 2. Check door hits
+        for door in room.doors {
+            let dx = roomPt.x - door.position.x
+            let dz = roomPt.z - door.position.z
+            let dist = sqrt(dx*dx + dz*dz)
+            if dist <= max(door.width * 0.7, 0.45) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onSelectObject?(door.id)
+                return
+            }
+        }
+        
+        // 3. Check window hits
+        for win in room.windows {
+            let dx = roomPt.x - win.position.x
+            let dz = roomPt.z - win.position.z
+            let dist = sqrt(dx*dx + dz*dz)
+            if dist <= max(win.width * 0.7, 0.45) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onSelectObject?(win.id)
+                return
+            }
+        }
+        
+        // 4. Check wall hits (perpendicular distance to wall segment)
+        for wall in room.walls {
+            let p1 = wall.startPoint2D
+            let p2 = wall.endPoint2D
+            let wx = Float(p2.x - p1.x)
+            let wz = Float(p2.y - p1.y)
+            let lenSq = wx*wx + wz*wz
+            if lenSq > 0.0001 {
+                let t = max(0, min(1, ((roomPt.x - Float(p1.x)) * wx + (roomPt.z - Float(p1.y)) * wz) / lenSq))
+                let projX = Float(p1.x) + t * wx
+                let projZ = Float(p1.y) + t * wz
+                let dist = sqrt((roomPt.x - projX)*(roomPt.x - projX) + (roomPt.z - projZ)*(roomPt.z - projZ))
+                if dist <= 0.35 {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onSelectObject?(wall.id)
+                    return
+                }
             }
         }
         
@@ -391,6 +456,8 @@ public struct FloorPlan2DCanvas: View {
     private func drawWalls(
         context: inout GraphicsContext,
         walls: [WallSurface],
+        selectedId: UUID?,
+        showDimensions: Bool,
         toCanvas: (Float, Float) -> CGPoint,
         currentScale: CGFloat
     ) {
@@ -400,23 +467,70 @@ public struct FloorPlan2DCanvas: View {
             let startCanvas = toCanvas(Float(s.x), Float(s.y))
             let endCanvas = toCanvas(Float(e.x), Float(e.y))
             
+            let isSelected = (wall.id == selectedId)
             let wallPixelThick = max(CGFloat(wall.thickness) * currentScale, 5.0)
             
             var path = Path()
             path.move(to: startCanvas)
             path.addLine(to: endCanvas)
             
+            // Wall stroke
             context.stroke(
                 path,
-                with: .color(Color(UIColor.label)),
+                with: .color(isSelected ? Color.blue : Color(UIColor.label)),
                 style: StrokeStyle(lineWidth: wallPixelThick, lineCap: .square, lineJoin: .miter)
             )
+            
+            // If selected, draw outline highlight
+            if isSelected {
+                context.stroke(
+                    path,
+                    with: .color(Color.blue.opacity(0.35)),
+                    style: StrokeStyle(lineWidth: wallPixelThick + 8, lineCap: .round)
+                )
+            }
+            
+            // Per-wall measurement badge along wall line
+            if showDimensions {
+                let dx = endCanvas.x - startCanvas.x
+                let dy = endCanvas.y - startCanvas.y
+                let segLen = sqrt(dx*dx + dy*dy)
+                
+                if segLen > 28 {
+                    let midP = CGPoint(x: (startCanvas.x + endCanvas.x)/2.0, y: (startCanvas.y + endCanvas.y)/2.0)
+                    let normalX = -dy / segLen
+                    let normalY = dx / segLen
+                    let offsetDist: CGFloat = 16.0
+                    let badgeCenter = CGPoint(x: midP.x + normalX * offsetDist, y: midP.y + normalY * offsetDist)
+                    
+                    let distText = isMetric ? String(format: "%.2f m", wall.length) : String(format: "%.1f ft", wall.length * 3.28084)
+                    
+                    // Pill background for dimension badge
+                    let pillW: CGFloat = 52.0
+                    let pillH: CGFloat = 17.0
+                    let pillRect = CGRect(x: badgeCenter.x - pillW/2, y: badgeCenter.y - pillH/2, width: pillW, height: pillH)
+                    let pillPath = Path(roundedRect: pillRect, cornerRadius: 4.0)
+                    
+                    context.fill(pillPath, with: .color(Color(UIColor.systemBackground).opacity(0.92)))
+                    context.stroke(pillPath, with: .color(isSelected ? Color.blue : Color(UIColor.separator)), lineWidth: 1.0)
+                    
+                    context.draw(
+                        Text(distText)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(isSelected ? Color.blue : Color.primary),
+                        at: badgeCenter,
+                        anchor: .center
+                    )
+                }
+            }
         }
     }
     
     private func drawDoors(
         context: inout GraphicsContext,
         doors: [DoorSurface],
+        selectedId: UUID?,
+        showDimensions: Bool,
         toCanvas: (Float, Float) -> CGPoint,
         currentScale: CGFloat
     ) {
@@ -425,6 +539,7 @@ public struct FloorPlan2DCanvas: View {
             let rot = door.transform.rotationY
             let w = door.width
             let hingeCanvas = toCanvas(pos.x - (w/2)*cos(rot), pos.z - (w/2)*sin(rot))
+            let isSelected = (door.id == selectedId)
             
             let radius = CGFloat(w) * currentScale
             var arcPath = Path()
@@ -439,8 +554,8 @@ public struct FloorPlan2DCanvas: View {
             
             context.stroke(
                 arcPath,
-                with: .color(Color.blue.opacity(0.8)),
-                style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])
+                with: .color(isSelected ? Color.blue : Color.blue.opacity(0.8)),
+                style: StrokeStyle(lineWidth: isSelected ? 2.5 : 1.5, dash: [4, 3])
             )
             
             let swingAngle = baseAngle + Angle(degrees: 90)
@@ -451,13 +566,34 @@ public struct FloorPlan2DCanvas: View {
             var leafPath = Path()
             leafPath.move(to: hingeCanvas)
             leafPath.addLine(to: leafEnd)
-            context.stroke(leafPath, with: .color(Color.blue), lineWidth: 2)
+            context.stroke(leafPath, with: .color(isSelected ? Color.blue : Color.blue), lineWidth: isSelected ? 3.5 : 2)
+            
+            if isSelected {
+                // Draw hinge circle handle
+                let hingeRect = CGRect(x: hingeCanvas.x - 5, y: hingeCanvas.y - 5, width: 10, height: 10)
+                context.fill(Path(ellipseIn: hingeRect), with: .color(Color.blue))
+            }
+            
+            // Door clearance dimension
+            if showDimensions {
+                let doorCenter = toCanvas(pos.x, pos.z)
+                let dimText = isMetric ? String(format: "%.2f m", door.width) : String(format: "%.1f ft", door.width * 3.28084)
+                context.draw(
+                    Text("Door \(dimText)")
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color.blue),
+                    at: CGPoint(x: doorCenter.x, y: doorCenter.y - 12),
+                    anchor: .center
+                )
+            }
         }
     }
     
     private func drawWindows(
         context: inout GraphicsContext,
         windows: [WindowSurface],
+        selectedId: UUID?,
+        showDimensions: Bool,
         toCanvas: (Float, Float) -> CGPoint,
         currentScale: CGFloat
     ) {
@@ -465,6 +601,7 @@ public struct FloorPlan2DCanvas: View {
             let pos = win.position
             let rot = win.transform.rotationY
             let halfW = win.width / 2.0
+            let isSelected = (win.id == selectedId)
             
             let p1 = toCanvas(pos.x - halfW * cos(rot), pos.z - halfW * sin(rot))
             let p2 = toCanvas(pos.x + halfW * cos(rot), pos.z + halfW * sin(rot))
@@ -473,7 +610,32 @@ public struct FloorPlan2DCanvas: View {
             path.move(to: p1)
             path.addLine(to: p2)
             
-            context.stroke(path, with: .color(Color.cyan), lineWidth: 3.5)
+            context.stroke(
+                path,
+                with: .color(isSelected ? Color.blue : Color.cyan),
+                lineWidth: isSelected ? 5.5 : 3.5
+            )
+            
+            if isSelected {
+                context.stroke(
+                    path,
+                    with: .color(Color.blue.opacity(0.35)),
+                    lineWidth: 10.0
+                )
+            }
+            
+            // Window dimension
+            if showDimensions {
+                let winCenter = toCanvas(pos.x, pos.z)
+                let dimText = isMetric ? String(format: "%.2f m", win.width) : String(format: "%.1f ft", win.width * 3.28084)
+                context.draw(
+                    Text("Win \(dimText)")
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color.cyan),
+                    at: CGPoint(x: winCenter.x, y: winCenter.y - 10),
+                    anchor: .center
+                )
+            }
         }
     }
     

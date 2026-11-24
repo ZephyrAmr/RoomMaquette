@@ -3,8 +3,12 @@ import SwiftUI
 public struct HomeDashboardView: View {
     @EnvironmentObject private var projectStore: ProjectStore
     @State private var showingScanSheet = false
+    @State private var showingScanImporter = false
     @State private var showingNewRoomAlert = false
     @State private var newRoomName = ""
+    @State private var importErrorMessage: String? = nil
+    @State private var showingImportErrorAlert = false
+    @State private var importedRoomToOpen: MaquetteRoom? = nil
     
     public init() {}
     
@@ -18,6 +22,9 @@ public struct HomeDashboardView: View {
                     
                     // Quick Action Hero Banner
                     scanCTASection
+                    
+                    // Import Existing Scan CTA
+                    importScanButton
                     
                     // Projects Section
                     VStack(alignment: .leading, spacing: 12) {
@@ -74,6 +81,14 @@ public struct HomeDashboardView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
                         Button {
+                            showingScanImporter = true
+                        } label: {
+                            Label("Import Scan (USDZ, JSON, OBJ)", systemImage: "square.and.arrow.down")
+                        }
+                        
+                        Divider()
+                        
+                        Button {
                             var studio = SampleRooms.modernStudio
                             studio.id = UUID()
                             studio.name = "Modern Studio #\(projectStore.rooms.count + 1)"
@@ -98,6 +113,23 @@ public struct HomeDashboardView: View {
             .sheet(isPresented: $showingScanSheet) {
                 RoomScanView()
                     .environmentObject(projectStore)
+            }
+            .fileImporter(
+                isPresented: $showingScanImporter,
+                allowedContentTypes: [.item, .data, .json]
+            ) { result in
+                switch result {
+                case .success(let url):
+                    handleScanImport(from: url)
+                case .failure(let error):
+                    importErrorMessage = error.localizedDescription
+                    showingImportErrorAlert = true
+                }
+            }
+            .alert("Import Error", isPresented: $showingImportErrorAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importErrorMessage ?? "Failed to import scan file.")
             }
         }
     }
@@ -214,5 +246,54 @@ public struct HomeDashboardView: View {
         .padding(14)
         .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
         .shadow(color: Color.black.opacity(0.03), radius: 4, y: 2)
+    }
+    
+    // MARK: - Import Scan Button
+    private var importScanButton: some View {
+        Button {
+            showingScanImporter = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.purple.opacity(0.12))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "square.and.arrow.down.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.purple)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Import Existing Scan")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
+                    Text("Import previous USDZ, JSON, or Wavefront OBJ room scans")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(12)
+            .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+    }
+    
+    private func handleScanImport(from url: URL) {
+        do {
+            let room = try ScanImporter.importScan(from: url)
+            projectStore.saveRoom(room)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        } catch {
+            importErrorMessage = error.localizedDescription
+            showingImportErrorAlert = true
+        }
     }
 }

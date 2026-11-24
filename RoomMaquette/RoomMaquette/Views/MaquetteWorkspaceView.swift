@@ -14,7 +14,7 @@ public struct MaquetteWorkspaceView: View {
     @State private var show3DDimensions: Bool = false
     @State private var showExportSheet: Bool = false
     @State private var showLocateMeSheet: Bool = false
-    @State private var showAddFurnitureSheet: Bool = false
+    @State private var showAddElementSheet: Bool = false
     @State private var showFileImporter: Bool = false
     @State private var showPlanMatchingSheet: Bool = false
     @State private var importErrorMessage: String? = nil
@@ -58,22 +58,25 @@ public struct MaquetteWorkspaceView: View {
                 }
                 
                 // Floating Selected Item Inspector Overlay (appears in both 3D & 2D when an item is tapped)
-                if let selId = selectedObjectId, let selectedObj = room.objects.first(where: { $0.id == selId }) {
+                if let element = currentInspectableElement {
                     VStack {
                         Spacer()
                         SelectedItemInspectorView(
-                            object: selectedObj,
+                            element: element,
                             onDelete: {
-                                deleteSelectedObject(id: selId)
+                                deleteSelectedElement(id: element.id)
                             },
                             onRotate: {
-                                rotateSelectedObject(id: selId)
+                                rotateSelectedElement(id: element.id)
                             },
                             onNudge: { dx, dz in
-                                nudgeSelectedObject(id: selId, dx: dx, dz: dz)
+                                nudgeSelectedElement(id: element.id, dx: dx, dz: dz)
                             },
                             onDuplicate: {
-                                duplicateSelectedObject(id: selId)
+                                duplicateSelectedElement(id: element.id)
+                            },
+                            onToggleState: {
+                                toggleSelectedElementState(id: element.id)
                             },
                             onDeselect: {
                                 selectedObjectId = nil
@@ -125,9 +128,9 @@ public struct MaquetteWorkspaceView: View {
                     Image(systemName: room.importedPlan != nil ? "doc.richtext.fill" : "doc.badge.plus")
                 }
                 
-                // Add Furniture Button
+                // Add Door / Window / Furniture Element Button
                 Button {
-                    showAddFurnitureSheet = true
+                    showAddElementSheet = true
                 } label: {
                     Image(systemName: "plus.circle")
                 }
@@ -143,10 +146,18 @@ public struct MaquetteWorkspaceView: View {
         .sheet(isPresented: $showExportSheet) {
             ExportSheetView(room: room)
         }
-        .sheet(isPresented: $showAddFurnitureSheet) {
-            AddFurnitureSheet { template in
-                addNewFurniture(template: template)
-            }
+        .sheet(isPresented: $showAddElementSheet) {
+            AddArchitecturalElementSheet(
+                onAddDoor: { width, height, isOpen in
+                    addNewDoor(width: width, height: height, isOpen: isOpen)
+                },
+                onAddWindow: { width, height in
+                    addNewWindow(width: width, height: height)
+                },
+                onAddFurniture: { template in
+                    addNewFurniture(template: template)
+                }
+            )
         }
         .sheet(isPresented: $showPlanMatchingSheet) {
             if room.importedPlan != nil {
@@ -328,72 +339,273 @@ public struct MaquetteWorkspaceView: View {
         )
     }
     
+    // MARK: - Selected Element Introspection
+    
+    private var currentInspectableElement: InspectableElement? {
+        guard let id = selectedObjectId else { return nil }
+        if let obj = room.objects.first(where: { $0.id == id }) {
+            return .furniture(obj)
+        } else if let door = room.doors.first(where: { $0.id == id }) {
+            return .door(door)
+        } else if let win = room.windows.first(where: { $0.id == id }) {
+            return .window(win)
+        } else if let wall = room.walls.first(where: { $0.id == id }) {
+            return .wall(wall)
+        }
+        return nil
+    }
+    
     // MARK: - Plan Editing Mutations & Persistence
     
-    private func deleteSelectedObject(id: UUID) {
+    private func deleteSelectedElement(id: UUID) {
         withAnimation {
             room.objects.removeAll { $0.id == id }
+            room.doors.removeAll { $0.id == id }
+            room.windows.removeAll { $0.id == id }
+            room.walls.removeAll { $0.id == id }
             selectedObjectId = nil
         }
         persistRoom()
     }
     
-    private func rotateSelectedObject(id: UUID) {
-        guard let idx = room.objects.firstIndex(where: { $0.id == id }) else { return }
-        var obj = room.objects[idx]
-        
-        let angle: Float = .pi / 4.0 // 45 degrees
-        let rotMat = simd_float4x4(
-            SIMD4<Float>(cos(angle), 0, sin(angle), 0),
+    private func rotateSelectedElement(id: UUID) {
+        let rotMat90 = simd_float4x4(
+            SIMD4<Float>(0, 0, 1, 0),
             SIMD4<Float>(0, 1, 0, 0),
-            SIMD4<Float>(-sin(angle), 0, cos(angle), 0),
+            SIMD4<Float>(-1, 0, 0, 0),
             SIMD4<Float>(0, 0, 0, 1)
         )
         
-        var newMat = simd_mul(obj.transform.matrix, rotMat)
-        // Keep translational position
-        newMat.columns.3 = obj.transform.matrix.columns.3
+        // 1. Furniture
+        if let idx = room.objects.firstIndex(where: { $0.id == id }) {
+            var obj = room.objects[idx]
+            let angle: Float = .pi / 4.0 // 45 degrees for furniture
+            let rotMat45 = simd_float4x4(
+                SIMD4<Float>(cos(angle), 0, sin(angle), 0),
+                SIMD4<Float>(0, 1, 0, 0),
+                SIMD4<Float>(-sin(angle), 0, cos(angle), 0),
+                SIMD4<Float>(0, 0, 0, 1)
+            )
+            var newMat = simd_mul(obj.transform.matrix, rotMat45)
+            newMat.columns.3 = obj.transform.matrix.columns.3
+            obj.transform = TransformMatrix(newMat)
+            room.objects[idx] = obj
+            persistRoom()
+            return
+        }
         
-        obj.transform = TransformMatrix(newMat)
-        room.objects[idx] = obj
-        persistRoom()
+        // 2. Door
+        if let idx = room.doors.firstIndex(where: { $0.id == id }) {
+            var door = room.doors[idx]
+            var newMat = simd_mul(door.transform.matrix, rotMat90)
+            newMat.columns.3 = door.transform.matrix.columns.3
+            door.transform = TransformMatrix(newMat)
+            room.doors[idx] = door
+            persistRoom()
+            return
+        }
+        
+        // 3. Window
+        if let idx = room.windows.firstIndex(where: { $0.id == id }) {
+            var win = room.windows[idx]
+            var newMat = simd_mul(win.transform.matrix, rotMat90)
+            newMat.columns.3 = win.transform.matrix.columns.3
+            win.transform = TransformMatrix(newMat)
+            room.windows[idx] = win
+            persistRoom()
+            return
+        }
+        
+        // 4. Wall
+        if let idx = room.walls.firstIndex(where: { $0.id == id }) {
+            var wall = room.walls[idx]
+            var newMat = simd_mul(wall.transform.matrix, rotMat90)
+            newMat.columns.3 = wall.transform.matrix.columns.3
+            wall.transform = TransformMatrix(newMat)
+            room.walls[idx] = wall
+            persistRoom()
+            return
+        }
     }
     
-    private func nudgeSelectedObject(id: UUID, dx: Float, dz: Float) {
-        guard let idx = room.objects.firstIndex(where: { $0.id == id }) else { return }
-        var obj = room.objects[idx]
-        var mat = obj.transform.matrix
-        mat.columns.3.x += dx
-        mat.columns.3.z += dz
-        obj.transform = TransformMatrix(mat)
-        room.objects[idx] = obj
-        persistRoom()
+    private func nudgeSelectedElement(id: UUID, dx: Float, dz: Float) {
+        if let idx = room.objects.firstIndex(where: { $0.id == id }) {
+            var obj = room.objects[idx]
+            var mat = obj.transform.matrix
+            mat.columns.3.x += dx
+            mat.columns.3.z += dz
+            obj.transform = TransformMatrix(mat)
+            room.objects[idx] = obj
+            persistRoom()
+            return
+        }
+        
+        if let idx = room.doors.firstIndex(where: { $0.id == id }) {
+            var door = room.doors[idx]
+            var mat = door.transform.matrix
+            mat.columns.3.x += dx
+            mat.columns.3.z += dz
+            door.transform = TransformMatrix(mat)
+            room.doors[idx] = door
+            persistRoom()
+            return
+        }
+        
+        if let idx = room.windows.firstIndex(where: { $0.id == id }) {
+            var win = room.windows[idx]
+            var mat = win.transform.matrix
+            mat.columns.3.x += dx
+            mat.columns.3.z += dz
+            win.transform = TransformMatrix(mat)
+            room.windows[idx] = win
+            persistRoom()
+            return
+        }
+        
+        if let idx = room.walls.firstIndex(where: { $0.id == id }) {
+            var wall = room.walls[idx]
+            var mat = wall.transform.matrix
+            mat.columns.3.x += dx
+            mat.columns.3.z += dz
+            wall.transform = TransformMatrix(mat)
+            room.walls[idx] = wall
+            persistRoom()
+            return
+        }
     }
     
     private func nudgeSelectedObjectTo(id: UUID, targetPos: SIMD3<Float>) {
-        guard let idx = room.objects.firstIndex(where: { $0.id == id }) else { return }
-        var obj = room.objects[idx]
-        var mat = obj.transform.matrix
-        mat.columns.3.x = targetPos.x
-        mat.columns.3.z = targetPos.z
-        obj.transform = TransformMatrix(mat)
-        room.objects[idx] = obj
+        if let idx = room.objects.firstIndex(where: { $0.id == id }) {
+            var obj = room.objects[idx]
+            var mat = obj.transform.matrix
+            mat.columns.3.x = targetPos.x
+            mat.columns.3.z = targetPos.z
+            obj.transform = TransformMatrix(mat)
+            room.objects[idx] = obj
+            persistRoom()
+            return
+        }
+        
+        if let idx = room.doors.firstIndex(where: { $0.id == id }) {
+            var door = room.doors[idx]
+            var mat = door.transform.matrix
+            mat.columns.3.x = targetPos.x
+            mat.columns.3.z = targetPos.z
+            door.transform = TransformMatrix(mat)
+            room.doors[idx] = door
+            persistRoom()
+            return
+        }
+        
+        if let idx = room.windows.firstIndex(where: { $0.id == id }) {
+            var win = room.windows[idx]
+            var mat = win.transform.matrix
+            mat.columns.3.x = targetPos.x
+            mat.columns.3.z = targetPos.z
+            win.transform = TransformMatrix(mat)
+            room.windows[idx] = win
+            persistRoom()
+            return
+        }
+    }
+    
+    private func duplicateSelectedElement(id: UUID) {
+        if let original = room.objects.first(where: { $0.id == id }) {
+            var copy = original
+            copy.id = UUID()
+            copy.customName = "\(original.displayName) Copy"
+            var mat = copy.transform.matrix
+            mat.columns.3.x += 0.35
+            mat.columns.3.z += 0.35
+            copy.transform = TransformMatrix(mat)
+            
+            withAnimation {
+                room.objects.append(copy)
+                selectedObjectId = copy.id
+            }
+            persistRoom()
+            return
+        }
+        
+        if let original = room.doors.first(where: { $0.id == id }) {
+            var copy = original
+            copy.id = UUID()
+            var mat = copy.transform.matrix
+            mat.columns.3.x += 0.35
+            mat.columns.3.z += 0.35
+            copy.transform = TransformMatrix(mat)
+            
+            withAnimation {
+                room.doors.append(copy)
+                selectedObjectId = copy.id
+            }
+            persistRoom()
+            return
+        }
+        
+        if let original = room.windows.first(where: { $0.id == id }) {
+            var copy = original
+            copy.id = UUID()
+            var mat = copy.transform.matrix
+            mat.columns.3.x += 0.35
+            mat.columns.3.z += 0.35
+            copy.transform = TransformMatrix(mat)
+            
+            withAnimation {
+                room.windows.append(copy)
+                selectedObjectId = copy.id
+            }
+            persistRoom()
+            return
+        }
+    }
+    
+    private func toggleSelectedElementState(id: UUID) {
+        if let idx = room.doors.firstIndex(where: { $0.id == id }) {
+            var door = room.doors[idx]
+            door.isOpen.toggle()
+            room.doors[idx] = door
+            persistRoom()
+        }
+    }
+    
+    private func addNewDoor(width: Float, height: Float, isOpen: Bool) {
+        let bounds = room.boundingBox
+        let center = (bounds.min + bounds.max) / 2.0
+        
+        var mat = matrix_identity_float4x4
+        mat.columns.3 = SIMD4<Float>(center.x, height / 2.0, center.z, 1.0)
+        
+        let newDoor = DoorSurface(
+            id: UUID(),
+            dimensions: SIMD3<Float>(width, height, 0.05),
+            transform: mat,
+            isOpen: isOpen
+        )
+        
+        withAnimation {
+            room.doors.append(newDoor)
+            selectedObjectId = newDoor.id
+        }
         persistRoom()
     }
     
-    private func duplicateSelectedObject(id: UUID) {
-        guard let original = room.objects.first(where: { $0.id == id }) else { return }
-        var copy = original
-        copy.id = UUID()
-        copy.customName = "\(original.displayName) Copy"
-        var mat = copy.transform.matrix
-        mat.columns.3.x += 0.35
-        mat.columns.3.z += 0.35
-        copy.transform = TransformMatrix(mat)
+    private func addNewWindow(width: Float, height: Float) {
+        let bounds = room.boundingBox
+        let center = (bounds.min + bounds.max) / 2.0
+        
+        var mat = matrix_identity_float4x4
+        mat.columns.3 = SIMD4<Float>(center.x, 1.20, center.z, 1.0)
+        
+        let newWindow = WindowSurface(
+            id: UUID(),
+            dimensions: SIMD3<Float>(width, height, 0.08),
+            transform: mat
+        )
         
         withAnimation {
-            room.objects.append(copy)
-            selectedObjectId = copy.id
+            room.windows.append(newWindow)
+            selectedObjectId = newWindow.id
         }
         persistRoom()
     }
