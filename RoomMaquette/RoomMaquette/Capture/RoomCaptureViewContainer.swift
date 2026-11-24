@@ -62,11 +62,11 @@ public struct RoomCaptureViewContainer: UIViewRepresentable {
                 }
             }
             
-            // Reconstruct finalized beautified room model from captured session data
+            // Reconstruct finalized beautified room model from captured session data using RoomBuilder
             Task {
                 do {
                     let builder = RoomBuilder(options: [.beautifyObjects])
-                    let finalized = try await builder.build(roomData: data)
+                    let finalized = try await builder.capturedRoom(from: data)
                     DispatchQueue.main.async {
                         self.parent.captureManager.handleFinalizedRoom(finalized)
                     }

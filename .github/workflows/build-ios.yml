@@ -44,10 +44,20 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee build_device.log || {
-              echo "::error::Build failed! Here are the compiler errors:"
-              grep -E "(error:|fatal error:)" build_device.log || tail -n 60 build_device.log
+              echo "::error::Build failed! Printing compiler errors:"
+              grep -E "(error:|fatal error:)" build_device.log | while IFS= read -r line; do
+                echo "::error::$line"
+              done
+              tail -n 60 build_device.log
               exit 1
             }
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-device-log
+          path: build_device.log
 
       - name: Package Unsigned IPA (Sideloadable with Sideloadly or AltStore)
         run: |
@@ -75,7 +85,10 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" 2>&1 | tee build_sim.log || {
               echo "::error::Simulator build failed! Here are the compiler errors:"
-              grep -E "(error:|fatal error:)" build_sim.log || tail -n 60 build_sim.log
+              grep -E "(error:|fatal error:)" build_sim.log | while IFS= read -r line; do
+                echo "::error::$line"
+              done
+              tail -n 60 build_sim.log
               exit 1
             }
           

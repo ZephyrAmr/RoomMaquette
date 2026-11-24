@@ -1,7 +1,5 @@
 import Foundation
 import SceneKit
-import SceneKit.ModelIO
-import ModelIO
 
 public class USDZExporter {
     
@@ -31,22 +29,16 @@ public class USDZExporter {
         
         // 2. Otherwise generate high-quality USDZ from SceneKit maquette scene
         let scene = SceneKitMaquetteRenderer.buildScene(for: room, style: style, showCeiling: false)
+        let success = scene.write(to: outputURL, options: nil, delegate: nil, progressHandler: nil)
         
-        // Attempt export using MDLAsset for standard USDZ compliance
-        let asset = MDLAsset(scnScene: scene)
-        if MDLAsset.canExportFileExtension("usdz") {
-            try asset.export(to: outputURL)
-        } else {
-            // Direct SceneKit fallback
-            let written = scene.write(to: outputURL, options: nil, delegate: nil, progressHandler: nil)
-            guard written else {
-                throw NSError(domain: "USDZExporter", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to write USDZ scene from SceneKit"])
-            }
-        }
-        
-        guard FileManager.default.fileExists(atPath: outputURL.path),
+        guard success,
+              FileManager.default.fileExists(atPath: outputURL.path),
               (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) > 0 else {
-            throw NSError(domain: "USDZExporter", code: 2, userInfo: [NSLocalizedDescriptionKey: "Generated USDZ file is missing or empty"])
+            throw NSError(
+                domain: "USDZExporter",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to generate USDZ file from SceneKit scene"]
+            )
         }
         
         return outputURL
