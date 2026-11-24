@@ -81,9 +81,8 @@ public class GLTFExporter {
         // Write Box Geometry to Buffer
         // 1. Position BufferView & Accessor
         let posOffset = binaryBuffer.count
-        var posBytes = unitPositions
-        binaryBuffer.append(Data(bytes: &posBytes, count: posBytes.count * 4))
-        let posLength = posBytes.count * 4
+        unitPositions.withUnsafeBytes { binaryBuffer.append(contentsOf: $0) }
+        let posLength = unitPositions.count * 4
         
         bufferViews.append([
             "buffer": 0,
@@ -103,9 +102,8 @@ public class GLTFExporter {
         
         // 2. Normal BufferView & Accessor
         let normOffset = binaryBuffer.count
-        var normBytes = unitNormals
-        binaryBuffer.append(Data(bytes: &normBytes, count: normBytes.count * 4))
-        let normLength = normBytes.count * 4
+        unitNormals.withUnsafeBytes { binaryBuffer.append(contentsOf: $0) }
+        let normLength = unitNormals.count * 4
         
         bufferViews.append([
             "buffer": 0,
@@ -125,9 +123,8 @@ public class GLTFExporter {
         
         // 3. Index BufferView & Accessor
         let idxOffset = binaryBuffer.count
-        var idxBytes = unitIndices
-        binaryBuffer.append(Data(bytes: &idxBytes, count: idxBytes.count * 2))
-        let idxLength = idxBytes.count * 2
+        unitIndices.withUnsafeBytes { binaryBuffer.append(contentsOf: $0) }
+        let idxLength = unitIndices.count * 2
         
         bufferViews.append([
             "buffer": 0,

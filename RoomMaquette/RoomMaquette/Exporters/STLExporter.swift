@@ -97,21 +97,17 @@ public class STLExporter {
             data.append(contentsOf: header)
             
             // Triangle count (UInt32)
-            var count = UInt32(triangles.count)
-            data.append(Data(bytes: &count, count: 4))
+            let count = UInt32(triangles.count)
+            withUnsafeBytes(of: count) { data.append(contentsOf: $0) }
             
             // Triangles (50 bytes each)
-            var zeroAttr: UInt16 = 0
+            let zeroAttr: UInt16 = 0
             for tri in triangles {
-                var n = tri.normal
-                var v1 = tri.v1
-                var v2 = tri.v2
-                var v3 = tri.v3
-                data.append(Data(bytes: &n, count: 12))
-                data.append(Data(bytes: &v1, count: 12))
-                data.append(Data(bytes: &v2, count: 12))
-                data.append(Data(bytes: &v3, count: 12))
-                data.append(Data(bytes: &zeroAttr, count: 2))
+                withUnsafeBytes(of: tri.normal) { data.append(contentsOf: $0) }
+                withUnsafeBytes(of: tri.v1) { data.append(contentsOf: $0) }
+                withUnsafeBytes(of: tri.v2) { data.append(contentsOf: $0) }
+                withUnsafeBytes(of: tri.v3) { data.append(contentsOf: $0) }
+                withUnsafeBytes(of: zeroAttr) { data.append(contentsOf: $0) }
             }
             
             try data.write(to: outputURL)

@@ -212,12 +212,20 @@ public class SceneKitMaquetteRenderer {
     }
     
     private static func createLineNode(from start: SCNVector3, to end: SCNVector3, color: UIColor) -> SCNNode {
-        let indices: [Int32] = [0, 1]
-        let source = SCNGeometrySource(vertices: [start, end])
-        let element = SCNGeometryElement(indices: indices, primitiveType: .line)
-        let geo = SCNGeometry(sources: [source], elements: [element])
-        geo.firstMaterial?.diffuse.contents = color
-        return SCNNode(geometry: geo)
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let dz = end.z - start.z
+        let distance = sqrt(dx*dx + dy*dy + dz*dz)
+        let cylinder = SCNCylinder(radius: 0.008, height: CGFloat(distance))
+        cylinder.firstMaterial?.diffuse.contents = color
+        let node = SCNNode(geometry: cylinder)
+        node.position = SCNVector3((start.x + end.x)/2.0, (start.y + end.y)/2.0, (start.z + end.z)/2.0)
+        if abs(dx) > abs(dz) {
+            node.eulerAngles = SCNVector3(0, 0, Float.pi / 2.0)
+        } else {
+            node.eulerAngles = SCNVector3(Float.pi / 2.0, 0, 0)
+        }
+        return node
     }
     
     // MARK: - Camera Setup

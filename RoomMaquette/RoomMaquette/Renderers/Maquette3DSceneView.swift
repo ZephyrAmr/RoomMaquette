@@ -71,9 +71,9 @@ public struct Maquette3DSceneView: UIViewRepresentable {
         }
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard let view = scnView else { return }
+            guard let view = scnView, let root = view.scene?.rootNode else { return }
             let location = gesture.location(in: view)
-            let hits = view.hitTest(location, options: [.rootNode: view.scene?.rootNode as Any])
+            let hits = view.hitTest(location, options: [.rootNode: root])
             
             if let firstHit = hits.first, let name = firstHit.node.name, !name.isEmpty, name != "FloorPlinth" {
                 parent.onSelectObject?(name)

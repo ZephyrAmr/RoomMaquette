@@ -33,6 +33,7 @@ jobs:
       - name: Build App for Physical iOS Device (Unsigned)
         run: |
           mkdir -p build/DerivedData
+          set -o pipefail
           xcodebuild clean build \
             -project RoomMaquette/RoomMaquette.xcodeproj \
             -scheme RoomMaquette \
@@ -42,7 +43,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee build_device.log || {
+              echo "::error::Build failed! Here are the compiler errors:"
+              grep -E "(error:|fatal error:)" build_device.log || tail -n 60 build_device.log
+              exit 1
+            }
 
       - name: Package Unsigned IPA (Sideloadable with Sideloadly or AltStore)
         run: |
@@ -59,6 +64,7 @@ jobs:
 
       - name: Build iOS Simulator App (For Mac or Simulator Testing)
         run: |
+          set -o pipefail
           xcodebuild build \
             -project RoomMaquette/RoomMaquette.xcodeproj \
             -scheme RoomMaquette \
@@ -67,7 +73,11 @@ jobs:
             -derivedDataPath build/DerivedDataSim \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" 2>&1 | tee build_sim.log || {
+              echo "::error::Simulator build failed! Here are the compiler errors:"
+              grep -E "(error:|fatal error:)" build_sim.log || tail -n 60 build_sim.log
+              exit 1
+            }
           
           SIM_APP_PATH=$(find build/DerivedDataSim -name "RoomMaquette.app" -type d | head -n 1)
           echo "Found simulator app at: $SIM_APP_PATH"
