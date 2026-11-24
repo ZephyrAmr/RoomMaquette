@@ -20,10 +20,6 @@ public struct FloorPlan2DCanvas: View {
     @State private var lastScale: CGFloat = 1.0
     @State private var lastOffset: CGSize = .zero
     
-    // Drag tracking for selected object
-    @State private var draggingObjectId: UUID? = nil
-    @State private var dragStartRoomPos: SIMD3<Float>? = nil
-    
     public init(
         room: MaquetteRoom,
         showGrid: Bool = true,
@@ -65,32 +61,25 @@ public struct FloorPlan2DCanvas: View {
             let centerX = CGFloat(bounds.min.x + bounds.max.x) / 2.0
             let centerZ = CGFloat(bounds.min.z + bounds.max.z) / 2.0
             
-            let midX = viewSize.width / 2.0 + offset.width
-            let midY = viewSize.height / 2.0 + offset.height
-            let currentScale = baseScale * scale
-            
-            // Transformation helpers
-            func toCanvasPoint(_ rx: Float, _ rz: Float) -> CGPoint {
-                let dx = CGFloat(rx) - centerX
-                let dz = CGFloat(rz) - centerZ
-                return CGPoint(
-                    x: midX + dx * currentScale,
-                    y: midY + dz * currentScale
-                )
-            }
-            
-            func toRoomPoint(_ pt: CGPoint) -> SIMD3<Float> {
-                let rx = Float((pt.x - midX) / currentScale + centerX)
-                let rz = Float((pt.y - midY) / currentScale + centerZ)
-                return SIMD3<Float>(rx, 0, rz)
-            }
-            
             ZStack {
                 // Background Blueprint Paper
                 Color(UIColor.systemGroupedBackground)
                     .ignoresSafeArea()
                 
                 Canvas { context, size in
+                    let midX = size.width / 2.0 + offset.width
+                    let midY = size.height / 2.0 + offset.height
+                    let currentScale = baseScale * scale
+                    
+                    func toCanvasPoint(_ rx: Float, _ rz: Float) -> CGPoint {
+                        let dx = CGFloat(rx) - centerX
+                        let dz = CGFloat(rz) - centerZ
+                        return CGPoint(
+                            x: midX + dx * currentScale,
+                            y: midY + dz * currentScale
+                        )
+                    }
+                    
                     // 1. Draw Architectural Grid
                     if showGrid {
                         drawGrid(context: &context, size: size, midX: midX, midY: midY, currentScale: currentScale)
@@ -133,7 +122,7 @@ public struct FloorPlan2DCanvas: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { location in
-                    handleTapAt(location, toRoomPoint: toRoomPoint)
+                    handleTapAt(location, viewSize: viewSize, bounds: bounds, baseScale: baseScale)
                 }
                 .gesture(
                     SimultaneousGesture(
@@ -211,8 +200,21 @@ public struct FloorPlan2DCanvas: View {
     
     // MARK: - Tap & Hit Detection
     
-    private func handleTapAt(_ screenPoint: CGPoint, toRoomPoint: (CGPoint) -> SIMD3<Float>) {
-        let roomPt = toRoomPoint(screenPoint)
+    private func handleTapAt(
+        _ screenPoint: CGPoint,
+        viewSize: CGSize,
+        bounds: (min: SIMD3<Float>, max: SIMD3<Float>),
+        baseScale: CGFloat
+    ) {
+        let midX = viewSize.width / 2.0 + offset.width
+        let midY = viewSize.height / 2.0 + offset.height
+        let currentScale = baseScale * scale
+        let centerX = CGFloat(bounds.min.x + bounds.max.x) / 2.0
+        let centerZ = CGFloat(bounds.min.z + bounds.max.z) / 2.0
+        
+        let rx = Float((screenPoint.x - midX) / currentScale + centerX)
+        let rz = Float((screenPoint.y - midY) / currentScale + centerZ)
+        let roomPt = SIMD3<Float>(rx, 0, rz)
         
         // Check furniture object hits
         for obj in room.objects {
@@ -514,7 +516,7 @@ public struct FloorPlan2DCanvas: View {
         // 1. Draw Directional Camera FOV Cone / Flashlight Beam
         if let heading = heading {
             let beamDistance: CGFloat = 45.0
-            let fovHalfAngle: Double = 28.0 // 56 degree FOV cone
+            let fovHalfAngle: Double = 28.0
             let headDeg = Double(heading) * 180.0 / .pi
             
             var conePath = Path()

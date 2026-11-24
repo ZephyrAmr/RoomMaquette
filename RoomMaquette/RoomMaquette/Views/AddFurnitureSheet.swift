@@ -78,8 +78,7 @@ public struct AddFurnitureSheet: View {
                                             .font(.headline)
                                             .foregroundColor(.primary)
                                         Text(String(format: "%.2fm × %.2fm  •  H: %.2fm", item.dimensions.x, item.dimensions.z, item.dimensions.y))
-                                            .font(.caption)
-                                            .fontDesign(.monospaced)
+                                            .font(.system(size: 11, weight: .medium, design: .monospaced))
                                             .foregroundColor(.secondary)
                                     }
                                     

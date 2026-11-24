@@ -43,8 +43,7 @@ public struct SelectedItemInspectorView: View {
                         .font(.subheadline)
                         .fontWeight(.bold)
                     Text(String(format: "%.2fm × %.2fm • H: %.2fm", object.width, object.depth, object.height))
-                        .font(.caption2)
-                        .fontDesign(.monospaced)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundColor(.secondary)
                 }
                 
