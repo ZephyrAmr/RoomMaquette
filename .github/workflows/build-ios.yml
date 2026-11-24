@@ -36,23 +36,30 @@ jobs:
         run: |
           xcodebuild -project RoomMaquette/RoomMaquette.xcodeproj -list
 
-      - name: Build Archive for Physical iOS Device (Unsigned)
+      - name: Build App for Physical iOS Device (Unsigned)
         run: |
-          mkdir -p build
-          xcodebuild clean archive \
+          mkdir -p build/DerivedData
+          xcodebuild clean build \
             -project RoomMaquette/RoomMaquette.xcodeproj \
             -scheme RoomMaquette \
             -destination "generic/platform=iOS" \
-            -archivePath build/RoomMaquette.xcarchive \
             -configuration Release \
+            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
 
       - name: Package Unsigned IPA (Sideloadable with Sideloadly or AltStore)
         run: |
           mkdir -p Payload
-          cp -r build/RoomMaquette.xcarchive/Products/Applications/RoomMaquette.app Payload/
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/RoomMaquette.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Searching for RoomMaquette.app..."
+            APP_PATH=$(find build/DerivedData -name "RoomMaquette.app" -type d | head -n 1)
+          fi
+          echo "Found app at: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
           zip -r RoomMaquette-unsigned.ipa Payload
           ls -lh RoomMaquette-unsigned.ipa
 
@@ -63,14 +70,14 @@ jobs:
             -scheme RoomMaquette \
             -destination "generic/platform=iOS Simulator" \
             -configuration Release \
-            -derivedDataPath build/DerivedData \
+            -derivedDataPath build/DerivedDataSim \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
           
-          cd build/DerivedData/Build/Products/Release-iphonesimulator
-          zip -r ../../../../RoomMaquette-Simulator.app.zip RoomMaquette.app
-          cd ../../../../
+          SIM_APP_PATH=$(find build/DerivedDataSim -name "RoomMaquette.app" -type d | head -n 1)
+          echo "Found simulator app at: $SIM_APP_PATH"
+          zip -r RoomMaquette-Simulator.app.zip "$SIM_APP_PATH"
           ls -lh RoomMaquette-Simulator.app.zip
 
       - name: Upload Sideloadable IPA Artifact

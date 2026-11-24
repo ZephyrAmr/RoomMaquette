@@ -30,12 +30,12 @@ public struct RoomCaptureViewContainer: UIViewRepresentable {
             self.parent = parent
         }
         
-        public func captureView(shouldPresent roomDataForProcessing: CapturedRoomData) -> Bool {
+        public func captureView(shouldPresent roomDataForProcessing: CapturedRoomData, error: (any Error)?) -> Bool {
             // Return true to present Apple's default post-processing view
             return true
         }
         
-        public func captureView(didPresent processingRoom: CapturedRoom, error: Error?) {
+        public func captureView(didPresent processingRoom: CapturedRoom, error: (any Error)?) {
             if let error = error {
                 DispatchQueue.main.async {
                     self.parent.captureManager.errorMessage = error.localizedDescription

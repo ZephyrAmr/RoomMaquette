@@ -66,12 +66,16 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
         
         // 2. Doors
         self.doors = capturedRoom.doors.map { door in
-            DoorSurface(
+            var isOpen = true
+            if case let .door(open) = door.category {
+                isOpen = open
+            }
+            return DoorSurface(
                 id: door.identifier,
                 dimensions: door.dimensions,
                 transform: door.transform,
-                isOpen: door.status == .open,
-                parentWallId: door.parent?.identifier
+                isOpen: isOpen,
+                parentWallId: door.parentIdentifier
             )
         }
         
@@ -81,7 +85,7 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
                 id: window.identifier,
                 dimensions: window.dimensions,
                 transform: window.transform,
-                parentWallId: window.parent?.identifier
+                parentWallId: window.parentIdentifier
             )
         }
         
@@ -91,7 +95,7 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
                 id: opening.identifier,
                 dimensions: opening.dimensions,
                 transform: opening.transform,
-                parentWallId: opening.parent?.identifier
+                parentWallId: opening.parentIdentifier
             )
         }
         
