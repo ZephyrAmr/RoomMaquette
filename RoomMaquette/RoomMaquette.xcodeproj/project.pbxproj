@@ -38,6 +38,10 @@
 		2975EE5E9BFAE212284C9AC4 /* ExportSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E6FFF9DAC38098E1B70747E /* ExportSheetView.swift */; };
 		014E1D5CA63F41B3718C61B5 /* QuickLookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B50952367B27BD29DFE302A /* QuickLookView.swift */; };
 		2C3B14CD1DEAED5AEA2C47F6 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05EAC92CD4199707D62CBDEA /* ShareSheet.swift */; };
+		A11100010000000000000001 /* ARIndoorPositionTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11100020000000000000001 /* ARIndoorPositionTracker.swift */; };
+		A11100010000000000000002 /* RoomLocateMeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11100020000000000000002 /* RoomLocateMeView.swift */; };
+		A11100010000000000000003 /* AddFurnitureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11100020000000000000003 /* AddFurnitureSheet.swift */; };
+		A11100010000000000000004 /* SelectedItemInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11100020000000000000004 /* SelectedItemInspectorView.swift */; };
 		536C1F7229F32371F19E0950 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F5711A4F8FE991CF76A72175 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -74,6 +78,10 @@
 		9E6FFF9DAC38098E1B70747E /* ExportSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExportSheetView.swift"; sourceTree = "<group>"; };
 		4B50952367B27BD29DFE302A /* QuickLookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuickLookView.swift"; sourceTree = "<group>"; };
 		05EAC92CD4199707D62CBDEA /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ShareSheet.swift"; sourceTree = "<group>"; };
+		A11100020000000000000001 /* ARIndoorPositionTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ARIndoorPositionTracker.swift"; sourceTree = "<group>"; };
+		A11100020000000000000002 /* RoomLocateMeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RoomLocateMeView.swift"; sourceTree = "<group>"; };
+		A11100020000000000000003 /* AddFurnitureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AddFurnitureSheet.swift"; sourceTree = "<group>"; };
+		A11100020000000000000004 /* SelectedItemInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SelectedItemInspectorView.swift"; sourceTree = "<group>"; };
 		F5711A4F8FE991CF76A72175 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
 		2E7FD93E293410983D756A14 /* RoomMaquette.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomMaquette.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -115,6 +123,7 @@
 				9AC6E3E908EDFCA7E6ADD9B8 /* LiDARDetector.swift */,
 				5548AAFD5017956066C67BBC /* RoomCaptureManager.swift */,
 				A2B2D4DFE22B51A6E3E428DC /* RoomCaptureViewContainer.swift */,
+				A11100020000000000000001 /* ARIndoorPositionTracker.swift */,
 			);
 			path = Capture; sourceTree = "<group>";
 		};
@@ -154,6 +163,9 @@
 				9E6FFF9DAC38098E1B70747E /* ExportSheetView.swift */,
 				4B50952367B27BD29DFE302A /* QuickLookView.swift */,
 				05EAC92CD4199707D62CBDEA /* ShareSheet.swift */,
+				A11100020000000000000002 /* RoomLocateMeView.swift */,
+				A11100020000000000000003 /* AddFurnitureSheet.swift */,
+				A11100020000000000000004 /* SelectedItemInspectorView.swift */,
 			);
 			path = Views; sourceTree = "<group>";
 		};
@@ -294,6 +306,10 @@
 				2975EE5E9BFAE212284C9AC4 /* ExportSheetView.swift in Sources */,
 				014E1D5CA63F41B3718C61B5 /* QuickLookView.swift in Sources */,
 				2C3B14CD1DEAED5AEA2C47F6 /* ShareSheet.swift in Sources */,
+				A11100010000000000000001 /* ARIndoorPositionTracker.swift in Sources */,
+				A11100010000000000000002 /* RoomLocateMeView.swift in Sources */,
+				A11100010000000000000003 /* AddFurnitureSheet.swift in Sources */,
+				A11100010000000000000004 /* SelectedItemInspectorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

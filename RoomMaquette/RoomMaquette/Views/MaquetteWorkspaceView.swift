@@ -1,23 +1,28 @@
 import SwiftUI
 import QuickLook
+import simd
 
 public struct MaquetteWorkspaceView: View {
-    public var room: MaquetteRoom
+    public var initialRoom: MaquetteRoom
     @EnvironmentObject private var projectStore: ProjectStore
     
+    @State private var room: MaquetteRoom
     @State private var selectedTab: Int = 0 // 0: 3D Maquette, 1: 2D Plan, 2: Specs
     @State private var maquetteStyle: MaquetteStyle = .architecturalClay
     @State private var showCeiling: Bool = false
     @State private var show3DDimensions: Bool = false
     @State private var showExportSheet: Bool = false
+    @State private var showLocateMeSheet: Bool = false
+    @State private var showAddFurnitureSheet: Bool = false
     @State private var quickLookURL: URL? = nil
-    @State private var selectedObjectInfo: String? = nil
+    @State private var selectedObjectId: UUID? = nil
     @State private var isPreparingAR: Bool = false
     @State private var arErrorMessage: String? = nil
     @State private var showARErrorAlert: Bool = false
     
     public init(room: MaquetteRoom) {
-        self.room = room
+        self.initialRoom = room
+        self._room = State(initialValue: room)
     }
     
     public var body: some View {
@@ -34,34 +39,84 @@ public struct MaquetteWorkspaceView: View {
             .padding(.vertical, 8)
             .background(Color(UIColor.secondarySystemGroupedBackground))
             
-            // Content Area
+            // Main Content Area
             ZStack {
                 switch selectedTab {
                 case 0:
                     maquette3DContainer
                 case 1:
-                    FloorPlanTabView(room: room)
+                    floorPlanContainer
                 case 2:
                     RoomMetricsView(room: room)
                 default:
                     EmptyView()
+                }
+                
+                // Floating Selected Item Inspector Overlay (appears in both 3D & 2D when an item is tapped)
+                if let selId = selectedObjectId, let selectedObj = room.objects.first(where: { $0.id == selId }) {
+                    VStack {
+                        Spacer()
+                        SelectedItemInspectorView(
+                            object: selectedObj,
+                            onDelete: {
+                                deleteSelectedObject(id: selId)
+                            },
+                            onRotate: {
+                                rotateSelectedObject(id: selId)
+                            },
+                            onNudge: { dx, dz in
+                                nudgeSelectedObject(id: selId, dx: dx, dz: dz)
+                            },
+                            onDuplicate: {
+                                duplicateSelectedObject(id: selId)
+                            },
+                            onDeselect: {
+                                selectedObjectId = nil
+                            }
+                        )
+                        .padding(.bottom, 70)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
         }
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                // "Locate Me" Indoor Positioning Camera Button
+                Button {
+                    showLocateMeSheet = true
+                } label: {
+                    Label("Locate Me", systemImage: "location.viewfinder")
+                        .fontWeight(.semibold)
+                }
+                
+                // Add Furniture Button
+                Button {
+                    showAddFurnitureSheet = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+                
+                // Export Button
                 Button {
                     showExportSheet = true
                 } label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
-                        .fontWeight(.semibold)
+                    Image(systemName: "square.and.arrow.up")
                 }
             }
         }
         .sheet(isPresented: $showExportSheet) {
             ExportSheetView(room: room)
+        }
+        .sheet(isPresented: $showAddFurnitureSheet) {
+            AddFurnitureSheet { template in
+                addNewFurniture(template: template)
+            }
+        }
+        .fullScreenCover(isPresented: $showLocateMeSheet) {
+            RoomLocateMeView(room: room)
         }
         .quickLookPreview($quickLookURL)
         .alert("Unable to Start AR", isPresented: $showARErrorAlert) {
@@ -72,6 +127,7 @@ public struct MaquetteWorkspaceView: View {
     }
     
     // MARK: - 3D Maquette Container with Floating Overlays
+    
     private var maquette3DContainer: some View {
         ZStack {
             Maquette3DSceneView(
@@ -79,8 +135,11 @@ public struct MaquetteWorkspaceView: View {
                 style: maquetteStyle,
                 showCeiling: showCeiling,
                 showMeasurements: show3DDimensions,
-                onSelectObject: { name in
-                    selectedObjectInfo = name
+                selectedObjectId: selectedObjectId,
+                onSelectObject: { uuid in
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.selectedObjectId = uuid
+                    }
                 }
             )
             .ignoresSafeArea(edges: .bottom)
@@ -180,6 +239,121 @@ public struct MaquetteWorkspaceView: View {
             }
         }
     }
+    
+    // MARK: - 2D Floor Plan Container
+    
+    private var floorPlanContainer: some View {
+        FloorPlanTabView(
+            room: room,
+            selectedObjectId: selectedObjectId,
+            onSelectObject: { uuid in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    self.selectedObjectId = uuid
+                }
+            },
+            onMoveObject: { uuid, newPos in
+                nudgeSelectedObjectTo(id: uuid, targetPos: newPos)
+            }
+        )
+    }
+    
+    // MARK: - Plan Editing Mutations & Persistence
+    
+    private func deleteSelectedObject(id: UUID) {
+        withAnimation {
+            room.objects.removeAll { $0.id == id }
+            selectedObjectId = nil
+        }
+        persistRoom()
+    }
+    
+    private func rotateSelectedObject(id: UUID) {
+        guard let idx = room.objects.firstIndex(where: { $0.id == id }) else { return }
+        var obj = room.objects[idx]
+        
+        let angle: Float = .pi / 4.0 // 45 degrees
+        let rotMat = simd_float4x4(
+            SIMD4<Float>(cos(angle), 0, sin(angle), 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(-sin(angle), 0, cos(angle), 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+        
+        var newMat = simd_mul(obj.transform.matrix, rotMat)
+        // Keep translational position
+        newMat.columns.3 = obj.transform.matrix.columns.3
+        
+        obj.transform = TransformMatrix(newMat)
+        room.objects[idx] = obj
+        persistRoom()
+    }
+    
+    private func nudgeSelectedObject(id: UUID, dx: Float, dz: Float) {
+        guard let idx = room.objects.firstIndex(where: { $0.id == id }) else { return }
+        var obj = room.objects[idx]
+        var mat = obj.transform.matrix
+        mat.columns.3.x += dx
+        mat.columns.3.z += dz
+        obj.transform = TransformMatrix(mat)
+        room.objects[idx] = obj
+        persistRoom()
+    }
+    
+    private func nudgeSelectedObjectTo(id: UUID, targetPos: SIMD3<Float>) {
+        guard let idx = room.objects.firstIndex(where: { $0.id == id }) else { return }
+        var obj = room.objects[idx]
+        var mat = obj.transform.matrix
+        mat.columns.3.x = targetPos.x
+        mat.columns.3.z = targetPos.z
+        obj.transform = TransformMatrix(mat)
+        room.objects[idx] = obj
+        persistRoom()
+    }
+    
+    private func duplicateSelectedObject(id: UUID) {
+        guard let original = room.objects.first(where: { $0.id == id }) else { return }
+        var copy = original
+        copy.id = UUID()
+        copy.customName = "\(original.displayName) Copy"
+        var mat = copy.transform.matrix
+        mat.columns.3.x += 0.35
+        mat.columns.3.z += 0.35
+        copy.transform = TransformMatrix(mat)
+        
+        withAnimation {
+            room.objects.append(copy)
+            selectedObjectId = copy.id
+        }
+        persistRoom()
+    }
+    
+    private func addNewFurniture(template: FurnitureTemplate) {
+        let bounds = room.boundingBox
+        let center = (bounds.min + bounds.max) / 2.0
+        
+        var mat = matrix_identity_float4x4
+        mat.columns.3 = SIMD4<Float>(center.x, template.dimensions.y / 2.0, center.z, 1.0)
+        
+        let newObj = FurnitureObject(
+            id: UUID(),
+            category: template.category,
+            customName: template.name,
+            dimensions: template.dimensions,
+            transform: mat
+        )
+        
+        withAnimation {
+            room.objects.append(newObj)
+            selectedObjectId = newObj.id
+        }
+        persistRoom()
+    }
+    
+    private func persistRoom() {
+        projectStore.saveRoom(room)
+    }
+    
+    // MARK: - AR Quick Look
     
     private func launchARQuickLook() {
         isPreparingAR = true

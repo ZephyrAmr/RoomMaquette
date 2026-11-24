@@ -6,19 +6,22 @@ public struct Maquette3DSceneView: UIViewRepresentable {
     public var style: MaquetteStyle
     public var showCeiling: Bool
     public var showMeasurements: Bool
-    public var onSelectObject: ((String) -> Void)?
+    public var selectedObjectId: UUID?
+    public var onSelectObject: ((UUID?) -> Void)?
     
     public init(
         room: MaquetteRoom,
         style: MaquetteStyle = .architecturalClay,
         showCeiling: Bool = false,
         showMeasurements: Bool = false,
-        onSelectObject: ((String) -> Void)? = nil
+        selectedObjectId: UUID? = nil,
+        onSelectObject: ((UUID?) -> Void)? = nil
     ) {
         self.room = room
         self.style = style
         self.showCeiling = showCeiling
         self.showMeasurements = showMeasurements
+        self.selectedObjectId = selectedObjectId
         self.onSelectObject = onSelectObject
     }
     
@@ -34,11 +37,12 @@ public struct Maquette3DSceneView: UIViewRepresentable {
             for: room,
             style: style,
             showCeiling: showCeiling,
-            showMeasurements: showMeasurements
+            showMeasurements: showMeasurements,
+            selectedObjectId: selectedObjectId
         )
         scnView.scene = scene
         
-        // Tap recognizer for interactive object inspection
+        // Tap recognizer for selecting objects in 3D
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         scnView.addGestureRecognizer(tap)
         context.coordinator.scnView = scnView
@@ -48,12 +52,13 @@ public struct Maquette3DSceneView: UIViewRepresentable {
     
     public func updateUIView(_ uiView: SCNView, context: Context) {
         context.coordinator.parent = self
-        // Rebuild scene when room, style, or toggles change
+        // Rebuild scene when room, style, selection, or toggles change
         uiView.scene = SceneKitMaquetteRenderer.buildScene(
             for: room,
             style: style,
             showCeiling: showCeiling,
-            showMeasurements: showMeasurements
+            showMeasurements: showMeasurements,
+            selectedObjectId: selectedObjectId
         )
         uiView.backgroundColor = style.sceneBackgroundColor
     }
@@ -75,9 +80,23 @@ public struct Maquette3DSceneView: UIViewRepresentable {
             let location = gesture.location(in: view)
             let hits = view.hitTest(location, options: [.rootNode: root])
             
-            if let firstHit = hits.first, let name = firstHit.node.name, !name.isEmpty, name != "FloorPlinth" {
-                parent.onSelectObject?(name)
+            for hit in hits {
+                var targetNode: SCNNode? = hit.node
+                while targetNode != nil && targetNode != root {
+                    if let name = targetNode?.name, name.contains("_"), !name.contains("FloorPlinth") {
+                        let parts = name.split(separator: "_")
+                        if let last = parts.last, let uuid = UUID(uuidString: String(last)) {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            parent.onSelectObject?(uuid)
+                            return
+                        }
+                    }
+                    targetNode = targetNode?.parent
+                }
             }
+            
+            // Tapping empty background or plinth clears selection
+            parent.onSelectObject?(nil)
         }
     }
 }

@@ -8,7 +8,8 @@ public class SceneKitMaquetteRenderer {
         for room: MaquetteRoom,
         style: MaquetteStyle = .architecturalClay,
         showCeiling: Bool = false,
-        showMeasurements: Bool = false
+        showMeasurements: Bool = false,
+        selectedObjectId: UUID? = nil
     ) -> SCNScene {
         let scene = SCNScene()
         scene.background.contents = style.sceneBackgroundColor
@@ -33,7 +34,7 @@ public class SceneKitMaquetteRenderer {
         buildDoors(root: root, doors: room.doors, style: style)
         
         // 6. Furniture & Objects
-        buildFurniture(root: root, objects: room.objects, style: style)
+        buildFurniture(root: root, objects: room.objects, style: style, selectedId: selectedObjectId)
         
         // 7. Ceiling (if enabled)
         if showCeiling {
@@ -160,18 +161,38 @@ public class SceneKitMaquetteRenderer {
     }
     
     // MARK: - Furniture
-    private static func buildFurniture(root: SCNNode, objects: [FurnitureObject], style: MaquetteStyle) {
+    private static func buildFurniture(root: SCNNode, objects: [FurnitureObject], style: MaquetteStyle, selectedId: UUID? = nil) {
         for obj in objects {
             let w = CGFloat(obj.width)
             let h = CGFloat(obj.height)
             let d = CGFloat(obj.depth)
             
             let box = SCNBox(width: w, height: h, length: d, chamferRadius: 0.02)
-            box.firstMaterial = style.furnitureMaterial(for: obj.category)
+            let isSelected = (obj.id == selectedId)
+            
+            if isSelected {
+                let selMat = SCNMaterial()
+                selMat.diffuse.contents = UIColor.systemBlue
+                selMat.emission.contents = UIColor.systemBlue.withAlphaComponent(0.4)
+                box.firstMaterial = selMat
+            } else {
+                box.firstMaterial = style.furnitureMaterial(for: obj.category)
+            }
             
             let node = SCNNode(geometry: box)
             node.simdTransform = obj.transform.matrix
             node.name = "Object_\(obj.category.rawValue)_\(obj.id.uuidString)"
+            
+            if isSelected {
+                let outlineBox = SCNBox(width: w + 0.03, height: h + 0.03, length: d + 0.03, chamferRadius: 0.02)
+                let outlineMat = SCNMaterial()
+                outlineMat.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
+                outlineMat.fillMode = .lines
+                outlineBox.firstMaterial = outlineMat
+                let outlineNode = SCNNode(geometry: outlineBox)
+                node.addChildNode(outlineNode)
+            }
+            
             root.addChildNode(node)
         }
     }

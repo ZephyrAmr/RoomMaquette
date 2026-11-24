@@ -1,15 +1,26 @@
 import SwiftUI
+import simd
 
 public struct FloorPlanTabView: View {
     public var room: MaquetteRoom
+    public var selectedObjectId: UUID? = nil
+    public var onSelectObject: ((UUID?) -> Void)? = nil
+    public var onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil
     
     @State private var showGrid: Bool = true
     @State private var showDimensions: Bool = true
     @State private var isMetric: Bool = true
-    @State private var selectedItemLabel: String? = nil
     
-    public init(room: MaquetteRoom) {
+    public init(
+        room: MaquetteRoom,
+        selectedObjectId: UUID? = nil,
+        onSelectObject: ((UUID?) -> Void)? = nil,
+        onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil
+    ) {
         self.room = room
+        self.selectedObjectId = selectedObjectId
+        self.onSelectObject = onSelectObject
+        self.onMoveObject = onMoveObject
     }
     
     public var body: some View {
@@ -19,9 +30,9 @@ public struct FloorPlanTabView: View {
                 showGrid: showGrid,
                 showDimensions: showDimensions,
                 isMetric: isMetric,
-                onSelectObject: { label in
-                    selectedItemLabel = label
-                }
+                selectedObjectId: selectedObjectId,
+                onSelectObject: onSelectObject,
+                onMoveObject: onMoveObject
             )
             
             // Floating Toolbar at the bottom
