@@ -1,0 +1,42 @@
+# Xcode
+## User settings
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+
+## Build products
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+Payload/
+
+# Swift Package Manager
+.build/
+Packages/
+Package.pins
+Package.resolved
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+
+# Certificates and Provisioning (Never commit private keys!)
+*.p12
+*.mobileprovision
+*.pem
+*.key
