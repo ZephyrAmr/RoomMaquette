@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build-ipa:
     name: Build iOS IPA & Simulator App
@@ -59,7 +62,7 @@ jobs:
           name: build-device-log
           path: build_device.log
 
-      - name: Package Unsigned IPA (Sideloadable with Sideloadly or AltStore)
+      - name: Package Unsigned IPA (Sideloadable with SideStore, AltStore, Sideloadly)
         run: |
           mkdir -p Payload
           APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/RoomMaquette.app"
@@ -70,7 +73,8 @@ jobs:
           echo "Found app at: $APP_PATH"
           cp -r "$APP_PATH" Payload/
           zip -r RoomMaquette-unsigned.ipa Payload
-          ls -lh RoomMaquette-unsigned.ipa
+          cp RoomMaquette-unsigned.ipa RoomMaquette.ipa
+          ls -lh RoomMaquette.ipa
 
       - name: Build iOS Simulator App (For Mac or Simulator Testing)
         run: |
@@ -101,7 +105,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: RoomMaquette-iOS-Device-IPA
-          path: RoomMaquette-unsigned.ipa
+          path: RoomMaquette.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -112,3 +116,30 @@ jobs:
           path: RoomMaquette-Simulator.app.zip
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish Direct-Install GitHub Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "RoomMaquette Latest Release"
+          body: |
+            ## 📱 RoomMaquette Sideloading Release
+            
+            ### 🚀 One-Tap Installation on iPhone:
+            - **SideStore Direct Install**: [Install in SideStore](sidestore://install?url=https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette.ipa)
+            - **AltStore Direct Install**: [Install in AltStore](altstore://install?url=https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette.ipa)
+            
+            ### 🏪 Add as SideStore Source:
+            - Tap to add source: [Add to SideStore](sidestore://source?url=https://raw.githubusercontent.com/ZephyrAmr/RoomMaquette/main/sidestore-source.json)
+            - Or add manually in SideStore -> Sources: `https://raw.githubusercontent.com/ZephyrAmr/RoomMaquette/main/sidestore-source.json`
+            
+            ### 📦 Direct Downloads:
+            - **[RoomMaquette.ipa](https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette.ipa)** (Unsigned iOS app)
+            - **[RoomMaquette-Simulator.app.zip](https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette-Simulator.app.zip)** (Xcode Simulator)
+          files: |
+            RoomMaquette.ipa
+            RoomMaquette-unsigned.ipa
+            RoomMaquette-Simulator.app.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -40,3 +40,6 @@ __pycache__/
 *.mobileprovision
 *.pem
 *.key
+
+# Scratch files
+scratch/

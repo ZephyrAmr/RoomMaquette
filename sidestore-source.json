@@ -1,0 +1,31 @@
+{
+  "name": "ZephyrAmr Apps",
+  "identifier": "com.zephyramr.sidestore-source",
+  "sourceURL": "https://raw.githubusercontent.com/ZephyrAmr/RoomMaquette/main/sidestore-source.json",
+  "subtitle": "LiDAR 3D Architectural Room Capture & Maquettes",
+  "description": "RoomMaquette leverages iPhone Pro LiDAR and Apple RoomPlan to capture rooms into interactive 3D architectural maquettes and export in USDZ, OBJ, STL, GLTF, DXF, PNG, PDF, and SVG.",
+  "iconURL": "https://raw.githubusercontent.com/ZephyrAmr/RoomMaquette/main/assets/icon.png",
+  "headerURL": "https://raw.githubusercontent.com/ZephyrAmr/RoomMaquette/main/assets/header.png",
+  "apps": [
+    {
+      "name": "RoomMaquette",
+      "bundleIdentifier": "com.zephyramr.RoomMaquette",
+      "developerName": "ZephyrAmr",
+      "subtitle": "LiDAR 3D Room Capture & Floor Plan",
+      "localizedDescription": "Native Apple RoomPlan LiDAR room scanner for iPhone Pro. Features real-time multi-surface detection, Museum Clay & Basswood 3D architectural rendering, 2D blueprint drafting view, AR QuickLook preview, and USDZ/OBJ/STL/GLTF/DXF/PNG/PDF/SVG export.",
+      "iconURL": "https://raw.githubusercontent.com/ZephyrAmr/RoomMaquette/main/assets/icon.png",
+      "tintColor": "007AFF",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "buildVersion": "1",
+          "date": "2026-11-24T17:00:00Z",
+          "localizedDescription": "Initial release with full LiDAR room capture, real-time surface streaming, and AR QuickLook preview.",
+          "downloadURL": "https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette.ipa",
+          "size": 450000
+        }
+      ]
+    }
+  ]
+}
