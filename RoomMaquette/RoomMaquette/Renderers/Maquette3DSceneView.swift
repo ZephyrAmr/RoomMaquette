@@ -41,8 +41,8 @@ public struct Maquette3DSceneView: UIViewRepresentable {
             selectedObjectId: selectedObjectId
         )
         scnView.scene = scene
+        context.coordinator.recordSnapshot(from: self)
         
-        // Tap recognizer for selecting objects in 3D
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         scnView.addGestureRecognizer(tap)
         context.coordinator.scnView = scnView
@@ -52,15 +52,30 @@ public struct Maquette3DSceneView: UIViewRepresentable {
     
     public func updateUIView(_ uiView: SCNView, context: Context) {
         context.coordinator.parent = self
-        // Rebuild scene when room, style, selection, or toggles change
-        uiView.scene = SceneKitMaquetteRenderer.buildScene(
+        guard context.coordinator.needsRebuild(for: self) else { return }
+        
+        let sameRoom = (context.coordinator.lastRoomId == room.id)
+        let savedTransform = sameRoom ? uiView.pointOfView?.simdTransform : nil
+        
+        let newScene = SceneKitMaquetteRenderer.buildScene(
             for: room,
             style: style,
             showCeiling: showCeiling,
             showMeasurements: showMeasurements,
             selectedObjectId: selectedObjectId
         )
+        
+        if let saved = savedTransform,
+           let camNode = newScene.rootNode.childNode(withName: "MainCamera", recursively: true) {
+            camNode.simdTransform = saved
+            uiView.scene = newScene
+            uiView.pointOfView = camNode
+        } else {
+            uiView.scene = newScene
+        }
+        
         uiView.backgroundColor = style.sceneBackgroundColor
+        context.coordinator.recordSnapshot(from: self)
     }
     
     public func makeCoordinator() -> Coordinator {
@@ -71,8 +86,32 @@ public struct Maquette3DSceneView: UIViewRepresentable {
         var parent: Maquette3DSceneView
         weak var scnView: SCNView?
         
+        var lastRoomId: UUID?
+        private var lastRoom: MaquetteRoom?
+        private var lastStyle: MaquetteStyle?
+        private var lastShowCeiling: Bool?
+        private var lastShowMeasurements: Bool?
+        private var lastSelectedObjectId: UUID?
+        
         init(_ parent: Maquette3DSceneView) {
             self.parent = parent
+        }
+        
+        func needsRebuild(for view: Maquette3DSceneView) -> Bool {
+            return lastRoom != view.room ||
+                   lastStyle != view.style ||
+                   lastShowCeiling != view.showCeiling ||
+                   lastShowMeasurements != view.showMeasurements ||
+                   lastSelectedObjectId != view.selectedObjectId
+        }
+        
+        func recordSnapshot(from view: Maquette3DSceneView) {
+            lastRoomId = view.room.id
+            lastRoom = view.room
+            lastStyle = view.style
+            lastShowCeiling = view.showCeiling
+            lastShowMeasurements = view.showMeasurements
+            lastSelectedObjectId = view.selectedObjectId
         }
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -95,7 +134,6 @@ public struct Maquette3DSceneView: UIViewRepresentable {
                 }
             }
             
-            // Tapping empty background or plinth clears selection
             parent.onSelectObject?(nil)
         }
     }

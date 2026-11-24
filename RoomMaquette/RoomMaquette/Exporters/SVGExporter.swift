@@ -111,6 +111,17 @@ public class SVGExporter {
         }
         svg += "</g>\n\n"
         
+        // 4b. Openings Layer
+        svg += "<g id=\"openings\">\n"
+        for op in room.openings {
+            let halfW = op.width / 2.0
+            let rot = op.transform.rotationY
+            let p1 = toSVG(op.position.x - halfW*cos(rot), op.position.z - halfW*sin(rot))
+            let p2 = toSVG(op.position.x + halfW*cos(rot), op.position.z + halfW*sin(rot))
+            svg += "  <line x1=\"\(p1.x)\" y1=\"\(p1.y)\" x2=\"\(p2.x)\" y2=\"\(p2.y)\" stroke=\"#0D9488\" stroke-width=\"3\" stroke-dasharray=\"5,4\" fill=\"none\"/>\n"
+        }
+        svg += "</g>\n\n"
+        
         // 5. Doors Layer
         svg += "<g id=\"doors\">\n"
         for door in room.doors {

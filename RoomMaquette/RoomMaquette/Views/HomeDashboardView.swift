@@ -264,11 +264,11 @@ public struct HomeDashboardView: View {
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Import Existing Scan")
+                    Text("Import Scan or Floor Plan")
                         .font(.subheadline)
                         .fontWeight(.bold)
                         .foregroundColor(.primary)
-                    Text("Import previous USDZ, JSON, or Wavefront OBJ room scans")
+                    Text("Import USDZ, JSON backup, OBJ scans, or PNG/PDF/SVG plans")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }

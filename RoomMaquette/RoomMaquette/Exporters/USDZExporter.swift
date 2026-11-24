@@ -18,8 +18,9 @@ public class USDZExporter {
             try? FileManager.default.removeItem(at: outputURL)
         }
         
-        // 1. If native RoomPlan capture USDZ data is stored, write and return it
-        if let rawUSDZ = room.usdzData, !rawUSDZ.isEmpty {
+        // 1. If native RoomPlan capture USDZ data is stored AND unedited in default style, write and return it
+        let isUneditedSinceCapture = abs(room.modifiedAt.timeIntervalSince(room.createdAt)) < 2.0
+        if style == .architecturalClay, isUneditedSinceCapture, let rawUSDZ = room.usdzData, !rawUSDZ.isEmpty {
             try rawUSDZ.write(to: outputURL, options: .atomic)
             if fileIsValidAndNonEmpty(at: outputURL) {
                 return outputURL

@@ -143,6 +143,19 @@ public struct ExportSheetView: View {
                             formatRow(for: .stl)
                             formatRow(for: .gltf)
                         }
+                        
+                        Divider()
+                            .padding(.vertical, 4)
+                        
+                        // Project Backup
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Lossless Backup", systemImage: "externaldrive.fill")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                            
+                            formatRow(for: .json)
+                        }
                     }
                     .padding()
                     .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))

@@ -33,6 +33,9 @@ public class SceneKitMaquetteRenderer {
         // 5. Doors
         buildDoors(root: root, doors: room.doors, style: style)
         
+        // 5b. Openings (Pass-through Archways)
+        buildOpenings(root: root, openings: room.openings, style: style)
+        
         // 6. Furniture & Objects
         buildFurniture(root: root, objects: room.objects, style: style, selectedId: selectedObjectId)
         
@@ -157,6 +160,26 @@ public class SceneKitMaquetteRenderer {
             doorNode.simdTransform = door.transform.matrix
             doorNode.name = "Door_\(door.id.uuidString)"
             root.addChildNode(doorNode)
+        }
+    }
+    
+    // MARK: - Openings
+    private static func buildOpenings(root: SCNNode, openings: [OpeningSurface], style: MaquetteStyle) {
+        for op in openings {
+            let w = CGFloat(op.width)
+            let h = CGFloat(op.height)
+            let thick: CGFloat = 0.06
+            
+            let frameGeo = SCNBox(width: w, height: h, length: thick, chamferRadius: 0.005)
+            let mat = SCNMaterial()
+            mat.diffuse.contents = UIColor.systemTeal.withAlphaComponent(0.28)
+            mat.transparency = 0.45
+            frameGeo.firstMaterial = mat
+            
+            let node = SCNNode(geometry: frameGeo)
+            node.simdTransform = op.transform.matrix
+            node.name = "Opening_\(op.id.uuidString)"
+            root.addChildNode(node)
         }
     }
     

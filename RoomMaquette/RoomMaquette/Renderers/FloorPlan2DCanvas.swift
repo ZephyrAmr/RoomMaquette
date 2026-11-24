@@ -27,6 +27,7 @@ public struct FloorPlan2DCanvas: View {
     public var selectedObjectId: UUID? = nil
     public var userPosition: SIMD3<Float>? = nil
     public var userHeading: Float? = nil
+    public var userPositionIsInPlanSpace: Bool = false
     public var isInteractiveEditing: Bool = true
     
     public var onSelectObject: ((UUID?) -> Void)? = nil
@@ -48,6 +49,7 @@ public struct FloorPlan2DCanvas: View {
         selectedObjectId: UUID? = nil,
         userPosition: SIMD3<Float>? = nil,
         userHeading: Float? = nil,
+        userPositionIsInPlanSpace: Bool = false,
         isInteractiveEditing: Bool = true,
         onSelectObject: ((UUID?) -> Void)? = nil,
         onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil,
@@ -62,6 +64,7 @@ public struct FloorPlan2DCanvas: View {
         self.selectedObjectId = selectedObjectId
         self.userPosition = userPosition
         self.userHeading = userHeading
+        self.userPositionIsInPlanSpace = userPositionIsInPlanSpace
         self.isInteractiveEditing = isInteractiveEditing
         self.onSelectObject = onSelectObject
         self.onMoveObject = onMoveObject
@@ -181,6 +184,13 @@ public struct FloorPlan2DCanvas: View {
                             toCanvas: toCanvasPoint,
                             currentScale: currentScale
                         )
+                        drawOpenings(
+                            context: &context,
+                            openings: room.openings,
+                            selectedId: selectedObjectId,
+                            showDimensions: showDimensions,
+                            toCanvas: toCanvasPoint
+                        )
                         
                         // Dimension Lines
                         if showDimensions {
@@ -194,10 +204,20 @@ public struct FloorPlan2DCanvas: View {
                     // 4. Live User Location Puck (Locate Me AR Mode)
                     if let userPos = userPosition {
                         if displayMode == .importedBlueprint, let plan = importedPlan {
-                            // Map AR/scan position into imported blueprint coordinate space
-                            let planPos = plan.alignment.mapScanToPlan(point: userPos)
-                            let puckCanvas = toCanvasPoint(planPos.x, planPos.z)
-                            let mappedHeading = userHeading.map { $0 + plan.alignment.rotationAngle }
+                            if userPositionIsInPlanSpace {
+                                let puckCanvas = toCanvasPoint(userPos.x, userPos.z)
+                                drawUserLocationPuck(context: &context, center: puckCanvas, heading: userHeading)
+                            } else {
+                                // Map AR/scan position into imported blueprint coordinate space
+                                let planPos = plan.alignment.mapScanToPlan(point: userPos)
+                                let puckCanvas = toCanvasPoint(planPos.x, planPos.z)
+                                let mappedHeading = userHeading.map { $0 + plan.alignment.rotationAngle }
+                                drawUserLocationPuck(context: &context, center: puckCanvas, heading: mappedHeading)
+                            }
+                        } else if userPositionIsInPlanSpace, let plan = importedPlan {
+                            let scanPos = plan.alignment.mapPlanToScan(point: userPos)
+                            let puckCanvas = toCanvasPoint(scanPos.x, scanPos.z)
+                            let mappedHeading = userHeading.map { $0 - plan.alignment.rotationAngle }
                             drawUserLocationPuck(context: &context, center: puckCanvas, heading: mappedHeading)
                         } else {
                             let puckCanvas = toCanvasPoint(userPos.x, userPos.z)
@@ -353,6 +373,18 @@ public struct FloorPlan2DCanvas: View {
             if dist <= max(win.width * 0.7, 0.45) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 onSelectObject?(win.id)
+                return
+            }
+        }
+        
+        // 3b. Check opening hits
+        for op in room.openings {
+            let dx = roomPt.x - op.position.x
+            let dz = roomPt.z - op.position.z
+            let dist = sqrt(dx*dx + dz*dz)
+            if dist <= max(op.width * 0.7, 0.45) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onSelectObject?(op.id)
                 return
             }
         }
@@ -633,6 +665,46 @@ public struct FloorPlan2DCanvas: View {
                         .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                         .foregroundColor(Color.cyan),
                     at: CGPoint(x: winCenter.x, y: winCenter.y - 10),
+                    anchor: .center
+                )
+            }
+        }
+    }
+    
+    private func drawOpenings(
+        context: inout GraphicsContext,
+        openings: [OpeningSurface],
+        selectedId: UUID?,
+        showDimensions: Bool,
+        toCanvas: (Float, Float) -> CGPoint
+    ) {
+        for op in openings {
+            let pos = op.position
+            let rot = op.transform.rotationY
+            let halfW = op.width / 2.0
+            let isSelected = (op.id == selectedId)
+            
+            let p1 = toCanvas(pos.x - halfW * cos(rot), pos.z - halfW * sin(rot))
+            let p2 = toCanvas(pos.x + halfW * cos(rot), pos.z + halfW * sin(rot))
+            
+            var path = Path()
+            path.move(to: p1)
+            path.addLine(to: p2)
+            
+            context.stroke(
+                path,
+                with: .color(isSelected ? Color.blue : Color.teal),
+                style: StrokeStyle(lineWidth: isSelected ? 4.5 : 3.0, lineCap: .butt, dash: [5, 4])
+            )
+            
+            if showDimensions {
+                let opCenter = toCanvas(pos.x, pos.z)
+                let dimText = isMetric ? String(format: "%.2f m", op.width) : String(format: "%.1f ft", op.width * 3.28084)
+                context.draw(
+                    Text("Open \(dimText)")
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color.teal),
+                    at: CGPoint(x: opCenter.x, y: opCenter.y - 10),
                     anchor: .center
                 )
             }

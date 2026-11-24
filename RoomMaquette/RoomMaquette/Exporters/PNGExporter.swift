@@ -187,6 +187,21 @@ public class PNGExporter {
                 cg.strokePath()
             }
             
+            // 6b. Openings
+            cg.setStrokeColor(UIColor.systemTeal.cgColor)
+            cg.setLineWidth(3.5)
+            cg.setLineDash(phase: 0, lengths: [6, 5])
+            for op in room.openings {
+                let halfW = op.width / 2.0
+                let rot = op.transform.rotationY
+                let p1 = toCanvas(op.position.x - halfW*cos(rot), op.position.z - halfW*sin(rot))
+                let p2 = toCanvas(op.position.x + halfW*cos(rot), op.position.z + halfW*sin(rot))
+                cg.move(to: p1)
+                cg.addLine(to: p2)
+                cg.strokePath()
+            }
+            cg.setLineDash(phase: 0, lengths: [])
+            
             // 7. Doors with 90° Swing Arc
             for door in room.doors {
                 let pos = door.position

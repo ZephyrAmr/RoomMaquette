@@ -41,8 +41,24 @@ public class PlanImporter {
     /// Converts an ImportedPlan directly into a playable MaquetteRoom with synthesized walls & boundaries
     public static func createRoom(from plan: ImportedPlan, name: String? = nil) -> MaquetteRoom {
         let roomName = (name ?? plan.name).trimmingCharacters(in: .whitespaces)
-        let ceilingH: Float = 2.60
+        let walls = synthesizeWalls(from: plan)
         
+        return MaquetteRoom(
+            id: UUID(),
+            name: roomName.isEmpty ? "Imported Plan Room" : roomName,
+            createdAt: Date(),
+            modifiedAt: Date(),
+            notes: "Created from imported plan: \(plan.name)",
+            walls: walls,
+            doors: [],
+            windows: [],
+            objects: [],
+            importedPlan: plan
+        )
+    }
+    
+    /// Synthesizes 3D WallSurfaces matching the plan's metric vectorLines
+    public static func synthesizeWalls(from plan: ImportedPlan, ceilingH: Float = 2.60) -> [WallSurface] {
         var walls: [WallSurface] = []
         for line in plan.vectorLines {
             let wallLen = line.length
@@ -85,19 +101,24 @@ public class PlanImporter {
                 walls.append(WallSurface(id: UUID(), dimensions: SIMD3<Float>(l.length, ceilingH, 0.15), transform: rotMat))
             }
         }
-        
-        return MaquetteRoom(
-            id: UUID(),
-            name: roomName.isEmpty ? "Imported Plan Room" : roomName,
-            createdAt: Date(),
-            modifiedAt: Date(),
-            notes: "Created from imported plan: \(plan.name)",
-            walls: walls,
-            doors: [],
-            windows: [],
-            objects: [],
-            importedPlan: plan
-        )
+        return walls
+    }
+    
+    /// Uniformly rescales an ImportedPlan's physical metric dimensions and vector lines
+    public static func rescaledPlan(_ plan: ImportedPlan, by factor: Float) -> ImportedPlan {
+        let clampedFactor = max(0.1, min(factor, 10.0))
+        var copy = plan
+        copy.originalWidthMeters *= clampedFactor
+        copy.originalDepthMeters *= clampedFactor
+        copy.vectorLines = plan.vectorLines.map { line in
+            PlanLine(
+                startX: line.startX * clampedFactor,
+                startZ: line.startZ * clampedFactor,
+                endX: line.endX * clampedFactor,
+                endZ: line.endZ * clampedFactor
+            )
+        }
+        return copy
     }
     
     // MARK: - PDF Blueprint Importer with Vision Vectorization

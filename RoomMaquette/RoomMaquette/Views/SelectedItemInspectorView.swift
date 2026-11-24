@@ -5,6 +5,7 @@ public enum InspectableElement {
     case furniture(FurnitureObject)
     case door(DoorSurface)
     case window(WindowSurface)
+    case opening(OpeningSurface)
     case wall(WallSurface)
     
     public var id: UUID {
@@ -12,6 +13,7 @@ public enum InspectableElement {
         case .furniture(let obj): return obj.id
         case .door(let d): return d.id
         case .window(let w): return w.id
+        case .opening(let op): return op.id
         case .wall(let wall): return wall.id
         }
     }
@@ -21,6 +23,7 @@ public enum InspectableElement {
         case .furniture(let obj): return obj.displayName
         case .door: return "Architectural Door"
         case .window: return "Architectural Window"
+        case .opening: return "Archway / Opening"
         case .wall(let wall): return wall.displayName
         }
     }
@@ -33,6 +36,8 @@ public enum InspectableElement {
             return String(format: "Width: %.2fm • Height: %.2fm • %@", d.width, d.height, d.isOpen ? "Swing Open" : "Closed")
         case .window(let w):
             return String(format: "Width: %.2fm • Height: %.2fm", w.width, w.height)
+        case .opening(let op):
+            return String(format: "Width: %.2fm • Height: %.2fm", op.width, op.height)
         case .wall(let wall):
             return String(format: "Length: %.2fm • Height: %.2fm • Thick: %.2fm", wall.length, wall.height, wall.thickness)
         }
@@ -43,6 +48,7 @@ public enum InspectableElement {
         case .furniture(let obj): return obj.category.systemIcon
         case .door: return "door.left.hand.open"
         case .window: return "window.vertical.closed"
+        case .opening: return "rectangle.dashed"
         case .wall: return "square.split.diagonal.2x2"
         }
     }
@@ -52,6 +58,7 @@ public enum InspectableElement {
         case .furniture(let obj): return obj.category.accentColor
         case .door: return .blue
         case .window: return .cyan
+        case .opening: return .teal
         case .wall: return .primary
         }
     }

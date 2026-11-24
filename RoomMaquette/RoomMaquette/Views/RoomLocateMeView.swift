@@ -115,7 +115,7 @@ public struct RoomLocateMeView: View {
                         .fill(tracker.isAutoLocalized ? Color.green : (tracker.isTracking ? Color.orange : Color.red))
                         .frame(width: 9, height: 9)
                     
-                    Text(tracker.isAutoLocalized ? (tracker.isLocatingOnImportedPlan ? "Localized on Plan" : "Auto-Localized") : (tracker.isLocatingOnImportedPlan ? "Scanning Walls to Locate on Plan..." : "Locating in Room..."))
+                    Text(tracker.isAutoLocalized ? (tracker.isLocatingOnImportedPlan ? "Localized on Plan" : "Auto-Localized") : (tracker.isLocatingOnImportedPlan ? "Scanning Walls (\(tracker.observedWallCount))..." : "Scanning Walls (\(tracker.observedWallCount))..."))
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.primary)
                 }
@@ -197,6 +197,7 @@ public struct RoomLocateMeView: View {
                 selectedObjectId: nil,
                 userPosition: tracker.currentPosition,
                 userHeading: tracker.currentHeading,
+                userPositionIsInPlanSpace: tracker.isLocatingOnImportedPlan,
                 isInteractiveEditing: false
             )
             .frame(height: minimapExpanded ? 380 : 220)

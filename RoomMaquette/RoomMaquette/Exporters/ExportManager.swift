@@ -14,6 +14,9 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
     case pdf = "PDF (Architectural Report Sheet)"
     case svg = "SVG (Vector Architectural Plan)"
     
+    // Project Backup
+    case json = "Maquette Project Backup (Lossless JSON)"
+    
     public var id: String { rawValue }
     
     public var fileExtension: String {
@@ -26,6 +29,7 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
         case .png: return "png"
         case .pdf: return "pdf"
         case .svg: return "svg"
+        case .json: return "json"
         }
     }
     
@@ -39,6 +43,7 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
         case .png: return "photo.fill"
         case .pdf: return "doc.richtext.fill"
         case .svg: return "beziercurve"
+        case .json: return "curlybraces"
         }
     }
     
@@ -48,6 +53,8 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
             return "3D Model Formats"
         case .png, .pdf, .svg:
             return "2D & Documentation Formats"
+        case .json:
+            return "Lossless Project Backup"
         }
     }
     
@@ -69,6 +76,8 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
             return "Professional A4 landscape architectural drawing with title block, 2D floor plan, 3D render, and furniture schedule."
         case .svg:
             return "Clean, layered vector graphic compatible with Adobe Illustrator, Figma, and Inkscape."
+        case .json:
+            return "100% lossless RoomMaquette backup preserving every wall, door, window, furniture item, and blueprint alignment for re-importing."
         }
     }
 }
@@ -111,6 +120,19 @@ public class ExportManager {
             
         case .svg:
             let url = try SVGExporter.export(room: room)
+            return [url]
+            
+        case .json:
+            let safeName = room.name
+                .replacingOccurrences(of: " ", with: "_")
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ":", with: "-")
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("\(safeName)_\(Int(Date().timeIntervalSince1970)).json")
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(room)
+            try data.write(to: url, options: .atomic)
             return [url]
         }
     }

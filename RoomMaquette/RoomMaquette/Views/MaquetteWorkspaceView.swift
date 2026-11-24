@@ -170,6 +170,13 @@ public struct MaquetteWorkspaceView: View {
                     onSave: { newTransform in
                         room.importedPlan?.alignment = newTransform
                         persistRoom()
+                    },
+                    onApplyPlanRescale: { updatedPlan in
+                        room.importedPlan = updatedPlan
+                        if room.notes.hasPrefix("Created from imported plan:") {
+                            room.walls = PlanImporter.synthesizeWalls(from: updatedPlan)
+                        }
+                        persistRoom()
                     }
                 )
             }
@@ -349,6 +356,8 @@ public struct MaquetteWorkspaceView: View {
             return .door(door)
         } else if let win = room.windows.first(where: { $0.id == id }) {
             return .window(win)
+        } else if let op = room.openings.first(where: { $0.id == id }) {
+            return .opening(op)
         } else if let wall = room.walls.first(where: { $0.id == id }) {
             return .wall(wall)
         }
@@ -362,6 +371,7 @@ public struct MaquetteWorkspaceView: View {
             room.objects.removeAll { $0.id == id }
             room.doors.removeAll { $0.id == id }
             room.windows.removeAll { $0.id == id }
+            room.openings.removeAll { $0.id == id }
             room.walls.removeAll { $0.id == id }
             selectedObjectId = nil
         }
@@ -416,6 +426,17 @@ public struct MaquetteWorkspaceView: View {
             return
         }
         
+        // 3b. Opening
+        if let idx = room.openings.firstIndex(where: { $0.id == id }) {
+            var op = room.openings[idx]
+            var newMat = simd_mul(op.transform.matrix, rotMat90)
+            newMat.columns.3 = op.transform.matrix.columns.3
+            op.transform = TransformMatrix(newMat)
+            room.openings[idx] = op
+            persistRoom()
+            return
+        }
+        
         // 4. Wall
         if let idx = room.walls.firstIndex(where: { $0.id == id }) {
             var wall = room.walls[idx]
@@ -462,6 +483,17 @@ public struct MaquetteWorkspaceView: View {
             return
         }
         
+        if let idx = room.openings.firstIndex(where: { $0.id == id }) {
+            var op = room.openings[idx]
+            var mat = op.transform.matrix
+            mat.columns.3.x += dx
+            mat.columns.3.z += dz
+            op.transform = TransformMatrix(mat)
+            room.openings[idx] = op
+            persistRoom()
+            return
+        }
+        
         if let idx = room.walls.firstIndex(where: { $0.id == id }) {
             var wall = room.walls[idx]
             var mat = wall.transform.matrix
@@ -504,6 +536,17 @@ public struct MaquetteWorkspaceView: View {
             mat.columns.3.z = targetPos.z
             win.transform = TransformMatrix(mat)
             room.windows[idx] = win
+            persistRoom()
+            return
+        }
+        
+        if let idx = room.openings.firstIndex(where: { $0.id == id }) {
+            var op = room.openings[idx]
+            var mat = op.transform.matrix
+            mat.columns.3.x = targetPos.x
+            mat.columns.3.z = targetPos.z
+            op.transform = TransformMatrix(mat)
+            room.openings[idx] = op
             persistRoom()
             return
         }

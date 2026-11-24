@@ -28,6 +28,10 @@ public struct FloorPlanTabView: View {
         self.onMoveObject = onMoveObject
         self.onImportPlan = onImportPlan
         self.onAlignPlan = onAlignPlan
+        let initialMode: FloorPlanDisplayMode = (room.importedPlan != nil && room.notes.hasPrefix("Created from imported plan:"))
+            ? .compositeOverlay
+            : .scannedPlan
+        self._displayMode = State(initialValue: initialMode)
     }
     
     public var body: some View {
@@ -61,7 +65,7 @@ public struct FloorPlanTabView: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "slider.horizontal.2.square")
-                                Text("Align")
+                                Text("Align / Scale")
                                     .font(.system(size: 11, weight: .bold))
                             }
                             .padding(.horizontal, 10)
