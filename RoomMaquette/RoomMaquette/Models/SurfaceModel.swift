@@ -133,6 +133,20 @@ public struct WallSurface: Identifiable, Codable, Equatable, Hashable {
         let cz = position.z
         return CGPoint(x: CGFloat(cx + halfLen * cosA), y: CGFloat(cz + halfLen * sinA))
     }
+    
+    public var displayName: String {
+        let rot = transform.rotationY
+        let deg = (Int(rot * 180.0 / .pi) % 360 + 360) % 360
+        if deg >= 315 || deg < 45 {
+            return "North Wall"
+        } else if deg >= 45 && deg < 135 {
+            return "East Wall"
+        } else if deg >= 135 && deg < 225 {
+            return "South Wall"
+        } else {
+            return "West Wall"
+        }
+    }
 }
 
 public struct DoorSurface: Identifiable, Codable, Equatable, Hashable {

@@ -159,15 +159,14 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         let centerPoint = CGPoint(x: 0.5, y: 0.5)
         
         // Primary: ARKit Raycasting against estimated planes and mesh
-        if let query = frame.raycastQuery(from: centerPoint, allowing: .estimatedPlane, alignment: .any) {
-            let hits = session.raycast(query)
-            if let hit = hits.first {
-                let hitPos = SIMD3<Float>(hit.worldTransform.columns.3.x, hit.worldTransform.columns.3.y, hit.worldTransform.columns.3.z)
-                let d = simd_distance(camPos, hitPos)
-                if d > 0.25 && d < 10.0 {
-                    let hitNorm = SIMD3<Float>(hit.worldTransform.columns.1.x, hit.worldTransform.columns.1.y, hit.worldTransform.columns.1.z)
-                    return SurfaceMeasurement(distance: d, normal: hitNorm)
-                }
+        let query = frame.raycastQuery(from: centerPoint, allowing: .estimatedPlane, alignment: .any)
+        let hits = session.raycast(query)
+        if let hit = hits.first {
+            let hitPos = SIMD3<Float>(hit.worldTransform.columns.3.x, hit.worldTransform.columns.3.y, hit.worldTransform.columns.3.z)
+            let d = simd_distance(camPos, hitPos)
+            if d > 0.25 && d < 10.0 {
+                let hitNorm = SIMD3<Float>(hit.worldTransform.columns.1.x, hit.worldTransform.columns.1.y, hit.worldTransform.columns.1.z)
+                return SurfaceMeasurement(distance: d, normal: hitNorm)
             }
         }
         
