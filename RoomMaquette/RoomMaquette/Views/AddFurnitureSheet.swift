@@ -7,13 +7,8 @@ public struct FurnitureTemplate: Identifiable {
     public var category: ObjectCategory
     public var dimensions: SIMD3<Float> // width, height, depth
     public var group: String
-}
-
-public struct AddFurnitureSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    public var onSelectTemplate: (FurnitureTemplate) -> Void
     
-    private let templates: [FurnitureTemplate] = [
+    public static let defaultTemplates: [FurnitureTemplate] = [
         // Living Room
         FurnitureTemplate(name: "3-Seat Sofa", category: .sofa, dimensions: SIMD3<Float>(2.10, 0.85, 0.90), group: "Living Room"),
         FurnitureTemplate(name: "Armchair", category: .chair, dimensions: SIMD3<Float>(0.85, 0.80, 0.85), group: "Living Room"),
@@ -44,6 +39,13 @@ public struct AddFurnitureSheet: View {
         FurnitureTemplate(name: "Toilet", category: .toilet, dimensions: SIMD3<Float>(0.50, 0.75, 0.70), group: "Bathroom"),
         FurnitureTemplate(name: "Bathroom Vanity", category: .sink, dimensions: SIMD3<Float>(0.90, 0.85, 0.50), group: "Bathroom"),
     ]
+}
+
+public struct AddFurnitureSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    public var onSelectTemplate: (FurnitureTemplate) -> Void
+    
+    private let templates: [FurnitureTemplate] = FurnitureTemplate.defaultTemplates
     
     private var groups: [String] {
         Array(Set(templates.map { $0.group })).sorted()

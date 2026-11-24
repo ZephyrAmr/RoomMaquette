@@ -217,7 +217,7 @@ public struct AddArchitecturalElementSheet: View {
                 .fontWeight(.bold)
                 .foregroundColor(.secondary)
             
-            ForEach(FurnitureCatalog.allTemplates) { template in
+            ForEach(FurnitureTemplate.defaultTemplates) { template in
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     onAddFurniture?(template)
