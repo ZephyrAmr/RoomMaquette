@@ -194,7 +194,9 @@ public struct MaquetteWorkspaceView: View {
             }
         }
         .fullScreenCover(isPresented: $showLocateMeSheet) {
-            RoomLocateMeView(room: room)
+            RoomLocateMeView(room: $room, onSaveRoom: {
+                persistRoom()
+            })
         }
         .quickLookPreview($quickLookURL)
         .alert("Unable to Start AR", isPresented: $showARErrorAlert) {

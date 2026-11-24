@@ -101,12 +101,14 @@ public struct FloorPlan2DCanvas: View {
                    let plan = importedPlan,
                    let data = plan.renderedImageData,
                    let uiImage = UIImage(data: data) {
-                    let imgW = CGFloat(plan.originalWidthMeters) * currentScale
-                    let imgH = CGFloat(plan.originalDepthMeters) * currentScale
                     let isComposite = (displayMode == .compositeOverlay)
+                    let invScale = isComposite ? CGFloat(1.0 / max(plan.alignment.scale, 0.001)) : 1.0
+                    let imgW = CGFloat(plan.originalWidthMeters) * invScale * currentScale
+                    let imgH = CGFloat(plan.originalDepthMeters) * invScale * currentScale
                     let imgRotation = isComposite ? Angle(radians: Double(-plan.alignment.rotationAngle)) : .zero
-                    let imgCenterX = isComposite ? midX + CGFloat(-plan.alignment.offsetX) * currentScale : midX
-                    let imgCenterY = isComposite ? midY + CGFloat(-plan.alignment.offsetZ) * currentScale : midY
+                    let planOriginInScan = isComposite ? plan.alignment.mapPlanToScan(point: .zero) : .zero
+                    let imgCenterX = isComposite ? midX + (CGFloat(planOriginInScan.x) - centerX) * currentScale : midX
+                    let imgCenterY = isComposite ? midY + (CGFloat(planOriginInScan.z) - centerZ) * currentScale : midY
                     
                     Image(uiImage: uiImage)
                         .resizable()

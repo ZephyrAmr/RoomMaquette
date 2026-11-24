@@ -11,6 +11,7 @@ public struct PlanMatchingView: View {
     @State private var currentTransform: PlanAlignmentTransform
     @State private var isAutoMatching: Bool = false
     @State private var overlayOpacity: Double = 0.65
+    @State private var dragStartOffset: SIMD2<Float>? = nil
     
     // 2-Point Scale Calibration State
     @State private var isCalibratingScale: Bool = false
@@ -219,6 +220,22 @@ public struct PlanMatchingView: View {
                     calPointB = pt
                 }
             }
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard !isCalibratingScale else { return }
+                        if dragStartOffset == nil {
+                            dragStartOffset = SIMD2<Float>(currentTransform.offsetX, currentTransform.offsetZ)
+                        }
+                        if let start = dragStartOffset {
+                            currentTransform.offsetX = start.x + Float(value.translation.width / scaleFactor)
+                            currentTransform.offsetZ = start.y + Float(value.translation.height / scaleFactor)
+                        }
+                    }
+                    .onEnded { _ in
+                        dragStartOffset = nil
+                    }
+            )
         }
     }
     
@@ -286,16 +303,34 @@ public struct PlanMatchingView: View {
                 .disabled(isAutoMatching)
                 
                 // Manual Rotation & Nudge Controls
-                HStack(spacing: 16) {
-                    HStack(spacing: 8) {
+                HStack(spacing: 12) {
+                    HStack(spacing: 6) {
                         Button {
                             withAnimation {
                                 currentTransform.rotationAngle -= .pi / 2.0
                             }
                         } label: {
-                            Image(systemName: "rotate.left")
-                                .font(.system(size: 16, weight: .bold))
-                                .frame(width: 40, height: 36)
+                            Text("-90°")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .frame(width: 38, height: 34)
+                                .background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        
+                        Button {
+                            currentTransform.rotationAngle -= (5.0 * .pi / 180.0)
+                        } label: {
+                            Text("-5°")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .frame(width: 34, height: 34)
+                                .background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        
+                        Button {
+                            currentTransform.rotationAngle += (5.0 * .pi / 180.0)
+                        } label: {
+                            Text("+5°")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .frame(width: 34, height: 34)
                                 .background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
                         }
                         
@@ -304,9 +339,9 @@ public struct PlanMatchingView: View {
                                 currentTransform.rotationAngle += .pi / 2.0
                             }
                         } label: {
-                            Image(systemName: "rotate.right")
-                                .font(.system(size: 16, weight: .bold))
-                                .frame(width: 40, height: 36)
+                            Text("+90°")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .frame(width: 38, height: 34)
                                 .background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
@@ -314,35 +349,37 @@ public struct PlanMatchingView: View {
                     Divider().frame(height: 28)
                     
                     HStack(spacing: 6) {
-                        Button { currentTransform.offsetX -= 0.25 } label: {
-                            Image(systemName: "arrow.left").frame(width: 32, height: 32).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+                        Button { currentTransform.offsetX -= 0.20 } label: {
+                            Image(systemName: "arrow.left").frame(width: 30, height: 34).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
                         }
-                        Button { currentTransform.offsetX += 0.25 } label: {
-                            Image(systemName: "arrow.right").frame(width: 32, height: 32).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+                        Button { currentTransform.offsetX += 0.20 } label: {
+                            Image(systemName: "arrow.right").frame(width: 30, height: 34).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
                         }
-                        Button { currentTransform.offsetZ -= 0.25 } label: {
-                            Image(systemName: "arrow.up").frame(width: 32, height: 32).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+                        Button { currentTransform.offsetZ -= 0.20 } label: {
+                            Image(systemName: "arrow.up").frame(width: 30, height: 34).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
                         }
-                        Button { currentTransform.offsetZ += 0.25 } label: {
-                            Image(systemName: "arrow.down").frame(width: 32, height: 32).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+                        Button { currentTransform.offsetZ += 0.20 } label: {
+                            Image(systemName: "arrow.down").frame(width: 30, height: 34).background(Color(UIColor.secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
                         }
                     }
                 }
                 
-                // Scale & Opacity Sliders
-                HStack(spacing: 14) {
-                    Text("Scale")
-                        .font(.caption2)
+                // Continuous Fine Angle Slider + Opacity
+                HStack(spacing: 12) {
+                    Text("Angle \(Int((currentTransform.rotationAngle * 180.0 / .pi).rounded()))°")
+                        .font(.caption2.monospaced())
                         .foregroundColor(.secondary)
+                        .frame(width: 68, alignment: .leading)
                     Slider(value: Binding(
-                        get: { Double(currentTransform.scale) },
-                        set: { currentTransform.scale = Float($0) }
-                    ), in: 0.5...2.0)
+                        get: { Double(currentTransform.rotationAngle) },
+                        set: { currentTransform.rotationAngle = Float($0) }
+                    ), in: -Double.pi...Double.pi)
                     
                     Text("Opacity")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     Slider(value: $overlayOpacity, in: 0.1...1.0)
+                        .frame(width: 75)
                 }
             }
         }
