@@ -619,23 +619,23 @@ public struct FloorPlan2DCanvas: View {
     private func drawUserLocationPuck(context: inout GraphicsContext, center: CGPoint, heading: Float?) {
         // 1. Draw Directional Camera FOV Cone / Flashlight Beam
         if let heading = heading {
-            let beamDistance: CGFloat = 45.0
-            let fovHalfAngle: Double = 28.0
-            let headDeg = Double(heading) * 180.0 / .pi
+            let beamDistance: CGFloat = 46.0
+            let fovHalfAngle: Double = 25.0 * .pi / 180.0 // 25 degrees in radians
+            let headRad = Double(heading)
             
             var conePath = Path()
             conePath.move(to: center)
             conePath.addArc(
                 center: center,
                 radius: beamDistance,
-                startAngle: Angle(degrees: headDeg - fovHalfAngle - 90),
-                endAngle: Angle(degrees: headDeg + fovHalfAngle - 90),
+                startAngle: Angle(radians: headRad - fovHalfAngle),
+                endAngle: Angle(radians: headRad + fovHalfAngle),
                 clockwise: false
             )
             conePath.closeSubpath()
             
-            context.fill(conePath, with: .color(Color.blue.opacity(0.18)))
-            context.stroke(conePath, with: .color(Color.blue.opacity(0.35)), lineWidth: 1)
+            context.fill(conePath, with: .color(Color.blue.opacity(0.20)))
+            context.stroke(conePath, with: .color(Color.blue.opacity(0.40)), lineWidth: 1.5)
         }
         
         // 2. Outer Pulse Halo
