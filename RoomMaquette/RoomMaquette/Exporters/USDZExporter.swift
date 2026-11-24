@@ -21,8 +21,7 @@ public class USDZExporter {
         // 1. If native RoomPlan capture USDZ data is stored, write and return it
         if let rawUSDZ = room.usdzData, !rawUSDZ.isEmpty {
             try rawUSDZ.write(to: outputURL, options: .atomic)
-            if FileManager.default.fileExists(atPath: outputURL.path),
-               (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) > 0 {
+            if fileIsValidAndNonEmpty(at: outputURL) {
                 return outputURL
             }
         }
@@ -31,9 +30,7 @@ public class USDZExporter {
         let scene = SceneKitMaquetteRenderer.buildScene(for: room, style: style, showCeiling: false)
         let success = scene.write(to: outputURL, options: nil, delegate: nil, progressHandler: nil)
         
-        guard success,
-              FileManager.default.fileExists(atPath: outputURL.path),
-              (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) > 0 else {
+        guard success, fileIsValidAndNonEmpty(at: outputURL) else {
             throw NSError(
                 domain: "USDZExporter",
                 code: 1,
@@ -42,5 +39,14 @@ public class USDZExporter {
         }
         
         return outputURL
+    }
+    
+    private static func fileIsValidAndNonEmpty(at url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? UInt64 else {
+            return false
+        }
+        return size > 0
     }
 }
