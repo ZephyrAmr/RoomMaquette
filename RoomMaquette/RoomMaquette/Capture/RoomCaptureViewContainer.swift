@@ -23,11 +23,21 @@ public struct RoomCaptureViewContainer: UIViewRepresentable {
         Coordinator(parent: self)
     }
     
+    @objc(RoomCaptureViewContainerCoordinator)
     public class Coordinator: NSObject, RoomCaptureViewDelegate {
         var parent: RoomCaptureViewContainer
         
         init(parent: RoomCaptureViewContainer) {
             self.parent = parent
+            super.init()
+        }
+        
+        required public init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+        
+        public func encode(with coder: NSCoder) {
+            // No custom encoding needed for coordinator
         }
         
         public func captureView(shouldPresent roomDataForProcessing: CapturedRoomData, error: (any Error)?) -> Bool {

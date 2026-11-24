@@ -70,32 +70,44 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
             if case let .door(open) = door.category {
                 isOpen = open
             }
+            var parentId: UUID? = nil
+            if #available(iOS 17.0, *) {
+                parentId = door.parentIdentifier
+            }
             return DoorSurface(
                 id: door.identifier,
                 dimensions: door.dimensions,
                 transform: door.transform,
                 isOpen: isOpen,
-                parentWallId: door.parentIdentifier
+                parentWallId: parentId
             )
         }
         
         // 3. Windows
         self.windows = capturedRoom.windows.map { window in
-            WindowSurface(
+            var parentId: UUID? = nil
+            if #available(iOS 17.0, *) {
+                parentId = window.parentIdentifier
+            }
+            return WindowSurface(
                 id: window.identifier,
                 dimensions: window.dimensions,
                 transform: window.transform,
-                parentWallId: window.parentIdentifier
+                parentWallId: parentId
             )
         }
         
         // 4. Openings
         self.openings = capturedRoom.openings.map { opening in
-            OpeningSurface(
+            var parentId: UUID? = nil
+            if #available(iOS 17.0, *) {
+                parentId = opening.parentIdentifier
+            }
+            return OpeningSurface(
                 id: opening.identifier,
                 dimensions: opening.dimensions,
                 transform: opening.transform,
-                parentWallId: opening.parentIdentifier
+                parentWallId: parentId
             )
         }
         
