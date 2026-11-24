@@ -1,4 +1,5 @@
 import SwiftUI
+import QuickLook
 
 public struct MaquetteWorkspaceView: View {
     public var room: MaquetteRoom
@@ -9,9 +10,11 @@ public struct MaquetteWorkspaceView: View {
     @State private var showCeiling: Bool = false
     @State private var show3DDimensions: Bool = false
     @State private var showExportSheet: Bool = false
-    @State private var showQuickLookAR: Bool = false
     @State private var quickLookURL: URL? = nil
     @State private var selectedObjectInfo: String? = nil
+    @State private var isPreparingAR: Bool = false
+    @State private var arErrorMessage: String? = nil
+    @State private var showARErrorAlert: Bool = false
     
     public init(room: MaquetteRoom) {
         self.room = room
@@ -60,10 +63,11 @@ public struct MaquetteWorkspaceView: View {
         .sheet(isPresented: $showExportSheet) {
             ExportSheetView(room: room)
         }
-        .sheet(isPresented: $showQuickLookAR) {
-            if let url = quickLookURL {
-                QuickLookView(previewItemURL: url)
-            }
+        .quickLookPreview($quickLookURL)
+        .alert("Unable to Start AR", isPresented: $showARErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(arErrorMessage ?? "Could not prepare the 3D model for Augmented Reality preview.")
         }
     }
     
@@ -113,16 +117,22 @@ public struct MaquetteWorkspaceView: View {
                     Button {
                         launchARQuickLook()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arkit")
+                        HStack(spacing: 6) {
+                            if isPreparingAR {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "arkit")
+                            }
                             Text("View in AR")
                                 .font(.system(size: 12, weight: .bold))
                         }
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(.ultraThinMaterial, in: Capsule())
                         .foregroundColor(.blue)
                     }
+                    .disabled(isPreparingAR)
                 }
                 .padding()
                 
@@ -172,11 +182,19 @@ public struct MaquetteWorkspaceView: View {
     }
     
     private func launchARQuickLook() {
+        isPreparingAR = true
         DispatchQueue.global(qos: .userInitiated).async {
-            if let url = try? USDZExporter.export(room: room, style: maquetteStyle) {
+            do {
+                let url = try USDZExporter.export(room: room, style: maquetteStyle)
                 DispatchQueue.main.async {
+                    self.isPreparingAR = false
                     self.quickLookURL = url
-                    self.showQuickLookAR = true
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isPreparingAR = false
+                    self.arErrorMessage = error.localizedDescription
+                    self.showARErrorAlert = true
                 }
             }
         }

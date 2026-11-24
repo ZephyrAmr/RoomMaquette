@@ -8,14 +8,13 @@ public struct QuickLookView: UIViewControllerRepresentable {
         self.previewItemURL = previewItemURL
     }
     
-    public func makeUIViewController(context: Context) -> UINavigationController {
+    public func makeUIViewController(context: Context) -> QLPreviewController {
         let controller = QLPreviewController()
         controller.dataSource = context.coordinator
-        let nav = UINavigationController(rootViewController: controller)
-        return nav
+        return controller
     }
     
-    public func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
+    public func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
     
     public func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)

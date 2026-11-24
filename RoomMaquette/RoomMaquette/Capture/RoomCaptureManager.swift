@@ -13,10 +13,15 @@ public class RoomCaptureManager: ObservableObject {
     @Published public var scanDurationSeconds: Int = 0
     @Published public var errorMessage: String? = nil
     @Published public var completedRoom: MaquetteRoom? = nil
+    @Published public var isProcessing: Bool = false
     
     public var roomCaptureView: RoomCaptureView?
+    public var latestCapturedRoom: CapturedRoom? = nil
+    public var completedRoomRaw: CapturedRoom? = nil
+    
+    private var pendingCompletion: ((MaquetteRoom?) -> Void)?
     private var timer: Timer?
-    private var captureSession: RoomCaptureSession?
+    private var watchdogTimer: Timer?
     
     public init() {
         if RoomCaptureSession.isSupported {
@@ -32,6 +37,7 @@ public class RoomCaptureManager: ObservableObject {
         
         isScanning = true
         isDone = false
+        isProcessing = false
         wallCount = 0
         doorCount = 0
         windowCount = 0
@@ -39,6 +45,9 @@ public class RoomCaptureManager: ObservableObject {
         scanDurationSeconds = 0
         errorMessage = nil
         completedRoom = nil
+        latestCapturedRoom = nil
+        completedRoomRaw = nil
+        pendingCompletion = nil
         
         let config = RoomCaptureSession.Configuration()
         roomCaptureView?.captureSession.run(configuration: config)
@@ -46,66 +55,105 @@ public class RoomCaptureManager: ObservableObject {
         // Start duration timer
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.scanDurationSeconds += 1
+            DispatchQueue.main.async {
+                self?.scanDurationSeconds += 1
+            }
         }
     }
     
     public func stopCapture(completion: @escaping (MaquetteRoom?) -> Void) {
         timer?.invalidate()
         timer = nil
+        isScanning = false
+        isProcessing = true
+        self.pendingCompletion = completion
         
         guard let view = roomCaptureView else {
-            completion(nil)
+            finishCapture(with: nil)
             return
         }
         
+        // Stop the capture session to trigger post-processing
         view.captureSession.stop()
-        isScanning = false
         
-        // Export room model asynchronously
+        // Safety watchdog: In case delegate callback doesn't arrive within 3.5 seconds,
+        // construct room directly from latestCapturedRoom
+        watchdogTimer?.invalidate()
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 3.5, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self = self, self.pendingCompletion != nil else { return }
+                if let captured = self.completedRoomRaw ?? self.latestCapturedRoom {
+                    let maquette = self.buildMaquetteRoom(from: captured)
+                    self.finishCapture(with: maquette)
+                } else {
+                    self.finishCapture(with: nil)
+                }
+            }
+        }
+    }
+    
+    public func handleFinalizedRoom(_ room: CapturedRoom?) {
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
+        
+        guard let room = room else {
+            if let latest = latestCapturedRoom {
+                let maquette = buildMaquetteRoom(from: latest)
+                finishCapture(with: maquette)
+            } else {
+                finishCapture(with: nil)
+            }
+            return
+        }
+        
+        self.completedRoomRaw = room
+        let maquette = buildMaquetteRoom(from: room)
+        finishCapture(with: maquette)
+    }
+    
+    private func finishCapture(with room: MaquetteRoom?) {
+        isProcessing = false
+        isDone = true
+        self.completedRoom = room
+        
+        if let completion = self.pendingCompletion {
+            self.pendingCompletion = nil
+            completion(room)
+        }
+    }
+    
+    public func buildMaquetteRoom(from captured: CapturedRoom) -> MaquetteRoom {
+        let scanName = "Room Scan \(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short))"
+        
+        // Export native certified USDZ mesh from RoomPlan if possible
+        var usdzData: Data? = nil
         let tempExportURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("RoomScan_\(UUID().uuidString).usdz")
         
-        // RoomPlan provides export on CapturedRoom
-        // We capture the final room data
-        // Delay slightly for the session to finalize processing
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self else { return }
-            
-            // Build the maquette room
-            // In a live scan, we construct the MaquetteRoom from the session's final capture
-            let scanName = "Room Scan \(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short))"
-            
-            // If native CapturedRoom is available or export succeeded:
-            var usdzData: Data? = nil
-            if FileManager.default.fileExists(atPath: tempExportURL.path) {
-                usdzData = try? Data(contentsOf: tempExportURL)
-                try? FileManager.default.removeItem(at: tempExportURL)
-            }
-            
-            let maquette = MaquetteRoom(
-                name: scanName,
-                notes: "LiDAR scan duration: \(self.scanDurationSeconds)s",
-                walls: [],
-                doors: [],
-                windows: [],
-                openings: [],
-                objects: [],
-                usdzData: usdzData
-            )
-            
-            self.completedRoom = maquette
-            self.isDone = true
-            completion(maquette)
+        if (try? captured.export(to: tempExportURL, exportOptions: .mesh)) != nil {
+            usdzData = try? Data(contentsOf: tempExportURL)
+            try? FileManager.default.removeItem(at: tempExportURL)
         }
+        
+        return MaquetteRoom(
+            from: captured,
+            name: scanName,
+            usdzData: usdzData
+        )
     }
     
     public func cancelCapture() {
         timer?.invalidate()
         timer = nil
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
         roomCaptureView?.captureSession.stop()
         isScanning = false
+        isProcessing = false
         isDone = false
+        latestCapturedRoom = nil
+        completedRoomRaw = nil
+        pendingCompletion = nil
     }
     
     public func updateLiveStats(walls: Int, doors: Int, windows: Int, objects: Int) {

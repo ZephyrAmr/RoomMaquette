@@ -33,6 +33,7 @@ public class ProjectStore: ObservableObject {
     }
     
     public func loadAllRooms() {
+        createDirectoryIfNeeded()
         guard let files = try? fileManager.contentsOfDirectory(at: documentsFolder, includingPropertiesForKeys: nil) else {
             return
         }
@@ -51,6 +52,7 @@ public class ProjectStore: ObservableObject {
     }
     
     public func saveRoom(_ room: MaquetteRoom) {
+        createDirectoryIfNeeded()
         var updated = room
         updated.modifiedAt = Date()
         
@@ -62,8 +64,11 @@ public class ProjectStore: ObservableObject {
         
         // Persist to disk
         let fileURL = documentsFolder.appendingPathComponent("\(updated.id.uuidString).json")
-        if let data = try? JSONEncoder().encode(updated) {
-            try? data.write(to: fileURL)
+        do {
+            let data = try JSONEncoder().encode(updated)
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            print("Failed to save room to disk: \(error.localizedDescription)")
         }
     }
     
