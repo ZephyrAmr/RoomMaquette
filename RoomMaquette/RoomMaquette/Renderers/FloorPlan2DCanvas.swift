@@ -74,22 +74,11 @@ public struct FloorPlan2DCanvas: View {
             let bounds = room.boundingBox
             
             // Coordinate frame sizing
-            let planW: CGFloat
-            let planD: CGFloat
-            let centerX: CGFloat
-            let centerZ: CGFloat
-            
-            if displayMode == .importedBlueprint, let plan = importedPlan {
-                planW = CGFloat(max(plan.originalWidthMeters, 2.0))
-                planD = CGFloat(max(plan.originalDepthMeters, 2.0))
-                centerX = 0.0
-                centerZ = 0.0
-            } else {
-                planW = CGFloat(max(bounds.max.x - bounds.min.x, 2.0))
-                planD = CGFloat(max(bounds.max.z - bounds.min.z, 2.0))
-                centerX = CGFloat(bounds.min.x + bounds.max.x) / 2.0
-                centerZ = CGFloat(bounds.min.z + bounds.max.z) / 2.0
-            }
+            let isBlueprint = (displayMode == .importedBlueprint && importedPlan != nil)
+            let planW = CGFloat(isBlueprint ? max(importedPlan!.originalWidthMeters, 2.0) : max(bounds.max.x - bounds.min.x, 2.0))
+            let planD = CGFloat(isBlueprint ? max(importedPlan!.originalDepthMeters, 2.0) : max(bounds.max.z - bounds.min.z, 2.0))
+            let centerX = isBlueprint ? 0.0 : CGFloat(bounds.min.x + bounds.max.x) / 2.0
+            let centerZ = isBlueprint ? 0.0 : CGFloat(bounds.min.z + bounds.max.z) / 2.0
             
             // Calculate base scale to fit room/blueprint nicely with padding
             let fitScaleX = (viewSize.width - 100) / planW
@@ -111,23 +100,10 @@ public struct FloorPlan2DCanvas: View {
                    let uiImage = UIImage(data: data) {
                     let imgW = CGFloat(plan.originalWidthMeters) * currentScale
                     let imgH = CGFloat(plan.originalDepthMeters) * currentScale
-                    
-                    let imgCenterX: CGFloat
-                    let imgCenterY: CGFloat
-                    let imgRotation: Angle
-                    
-                    if displayMode == .compositeOverlay {
-                        let align = plan.alignment
-                        imgRotation = Angle(radians: Double(-align.rotationAngle))
-                        let unrotDX = CGFloat(-align.offsetX) * currentScale
-                        let unrotDZ = CGFloat(-align.offsetZ) * currentScale
-                        imgCenterX = midX + unrotDX
-                        imgCenterY = midY + unrotDZ
-                    } else {
-                        imgCenterX = midX
-                        imgCenterY = midY
-                        imgRotation = .zero
-                    }
+                    let isComposite = (displayMode == .compositeOverlay)
+                    let imgRotation = isComposite ? Angle(radians: Double(-plan.alignment.rotationAngle)) : .zero
+                    let imgCenterX = isComposite ? midX + CGFloat(-plan.alignment.offsetX) * currentScale : midX
+                    let imgCenterY = isComposite ? midY + CGFloat(-plan.alignment.offsetZ) * currentScale : midY
                     
                     Image(uiImage: uiImage)
                         .resizable()
