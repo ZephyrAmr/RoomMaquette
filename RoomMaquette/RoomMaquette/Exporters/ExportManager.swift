@@ -84,6 +84,17 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
 
 public class ExportManager {
     
+    public static func sanitizedFileName(from name: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\:*?\"<>|,")
+            .union(.newlines)
+        let cleaned = name
+            .components(separatedBy: invalid)
+            .joined(separator: "-")
+            .replacingOccurrences(of: " ", with: "_")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "._-"))
+        return cleaned.isEmpty ? "RoomMaquette" : cleaned
+    }
+    
     public static func export(
         room: MaquetteRoom,
         format: ExportFormat,
@@ -123,10 +134,7 @@ public class ExportManager {
             return [url]
             
         case .json:
-            let safeName = room.name
-                .replacingOccurrences(of: " ", with: "_")
-                .replacingOccurrences(of: "/", with: "-")
-                .replacingOccurrences(of: ":", with: "-")
+            let safeName = sanitizedFileName(from: room.name)
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("\(safeName)_\(Int(Date().timeIntervalSince1970)).json")
             let encoder = JSONEncoder()

@@ -4,7 +4,8 @@ import PDFKit
 public class PDFExporter {
     
     public static func export(room: MaquetteRoom) throws -> URL {
-        let baseName = "\(room.name.replacingOccurrences(of: " ", with: "_"))_\(Int(Date().timeIntervalSince1970)).pdf"
+        let safeName = ExportManager.sanitizedFileName(from: room.name)
+        let baseName = "\(safeName)_\(Int(Date().timeIntervalSince1970)).pdf"
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(baseName)
         
         // Standard A4 Landscape: 842 x 595 points

@@ -123,7 +123,9 @@ public class RoomCaptureManager: ObservableObject {
     }
     
     public func buildMaquetteRoom(from captured: CapturedRoom) -> MaquetteRoom {
-        let scanName = "Room Scan \(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short))"
+        let df = DateFormatter()
+        df.dateFormat = "MMM d, HH-mm"
+        let scanName = "Room Scan \(df.string(from: Date()))"
         
         // Export native certified USDZ mesh from RoomPlan if possible
         var usdzData: Data? = nil

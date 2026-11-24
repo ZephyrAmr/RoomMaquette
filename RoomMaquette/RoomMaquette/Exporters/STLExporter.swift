@@ -12,7 +12,8 @@ public class STLExporter {
     
     /// Exports the room maquette as an STL file (ideal for 3D printing miniature architectural models)
     public static func export(room: MaquetteRoom, binary: Bool = true) throws -> URL {
-        let baseName = "\(room.name.replacingOccurrences(of: " ", with: "_"))_\(Int(Date().timeIntervalSince1970))"
+        let safeName = ExportManager.sanitizedFileName(from: room.name)
+        let baseName = "\(safeName)_\(Int(Date().timeIntervalSince1970))"
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(baseName).stl")
         
         var triangles: [Triangle] = []

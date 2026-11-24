@@ -4,7 +4,8 @@ import simd
 public class GLTFExporter {
     
     public static func export(room: MaquetteRoom) throws -> URL {
-        let baseName = "\(room.name.replacingOccurrences(of: " ", with: "_"))_\(Int(Date().timeIntervalSince1970))"
+        let safeName = ExportManager.sanitizedFileName(from: room.name)
+        let baseName = "\(safeName)_\(Int(Date().timeIntervalSince1970))"
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(baseName).gltf")
         
         var binaryBuffer = Data()

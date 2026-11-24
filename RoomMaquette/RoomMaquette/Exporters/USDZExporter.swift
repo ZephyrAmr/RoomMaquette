@@ -6,10 +6,7 @@ public class USDZExporter {
     /// Exports the room as a USDZ file.
     /// If native RoomPlan USDZ data exists, uses it; otherwise generates from SceneKit.
     public static func export(room: MaquetteRoom, style: MaquetteStyle = .architecturalClay) throws -> URL {
-        let safeName = room.name
-            .replacingOccurrences(of: " ", with: "_")
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
+        let safeName = ExportManager.sanitizedFileName(from: room.name)
         let fileName = "\(safeName)_\(room.id.uuidString).usdz"
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         

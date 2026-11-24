@@ -290,14 +290,16 @@ public struct ExportSheetView: View {
         errorMessage = nil
         exportedURLs = nil
         
-        DispatchQueue.global(qos: .userInitiated).async {
+        let needsMainThread = (selectedFormat == .pdf || selectedFormat == .png)
+        let queue: DispatchQueue = needsMainThread ? .main : DispatchQueue.global(qos: .userInitiated)
+        
+        queue.asyncAfter(deadline: .now() + 0.02) {
             do {
                 let urls = try ExportManager.export(room: room, format: selectedFormat, style: selectedStyle)
                 DispatchQueue.main.async {
                     self.exportedURLs = urls
                     self.isExporting = false
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    // Present native share sheet safely
                     ShareSheetHelper.present(items: urls)
                 }
             } catch {

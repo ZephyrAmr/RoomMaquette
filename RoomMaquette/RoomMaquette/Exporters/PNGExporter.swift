@@ -15,7 +15,8 @@ public class PNGExporter {
         isMetric: Bool = true,
         renderType: PNGRenderType = .floorPlan2D
     ) throws -> URL {
-        let baseName = "\(room.name.replacingOccurrences(of: " ", with: "_"))_2DPlan_\(Int(Date().timeIntervalSince1970)).png"
+        let safeName = ExportManager.sanitizedFileName(from: room.name)
+        let baseName = "\(safeName)_2DPlan_\(Int(Date().timeIntervalSince1970)).png"
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(baseName)
         
         let renderer = UIGraphicsImageRenderer(size: size)

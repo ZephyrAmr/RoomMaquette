@@ -4,7 +4,8 @@ import simd
 public class OBJExporter {
     
     public static func export(room: MaquetteRoom) throws -> (objURL: URL, mtlURL: URL) {
-        let baseName = "\(room.name.replacingOccurrences(of: " ", with: "_"))_\(Int(Date().timeIntervalSince1970))"
+        let safeName = ExportManager.sanitizedFileName(from: room.name)
+        let baseName = "\(safeName)_\(Int(Date().timeIntervalSince1970))"
         let objURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(baseName).obj")
         let mtlURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(baseName).mtl")
         
