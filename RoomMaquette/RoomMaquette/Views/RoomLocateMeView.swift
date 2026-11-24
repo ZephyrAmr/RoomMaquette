@@ -11,9 +11,12 @@ public struct RoomLocateMeView: View {
     @State private var minimapExpanded: Bool = false
     @State private var showingCalibrationAlert: Bool = false
     @State private var pendingCalibrationTarget: SIMD3<Float>? = nil
+    @State private var locateDisplayMode: FloorPlanDisplayMode
     
     public init(room: MaquetteRoom) {
         self.room = room
+        // If room has an imported blueprint, default to locating on the blueprint!
+        self._locateDisplayMode = State(initialValue: room.importedPlan != nil ? .importedBlueprint : .scannedPlan)
     }
     
     public var body: some View {
@@ -136,11 +139,21 @@ public struct RoomLocateMeView: View {
                     Image(systemName: "map.fill")
                         .font(.system(size: 13))
                         .foregroundColor(.blue)
-                    Text("Live 2D Room Minimap")
+                    Text(locateDisplayMode == .importedBlueprint ? (room.importedPlan?.name ?? "Blueprint") : "Live 2D Minimap")
                         .font(.system(size: 13, weight: .bold))
+                        .lineLimit(1)
                 }
                 
                 Spacer()
+                
+                if room.importedPlan != nil {
+                    Picker("Map View", selection: $locateDisplayMode) {
+                        Text("Blueprint").tag(FloorPlanDisplayMode.importedBlueprint)
+                        Text("Scan").tag(FloorPlanDisplayMode.scannedPlan)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 160)
+                }
                 
                 Text(tracker.isCalibrated ? "Calibrated" : "Tap plan to align")
                     .font(.caption2)
@@ -163,6 +176,8 @@ public struct RoomLocateMeView: View {
             // 2D Floor Plan Canvas with Live Position Puck
             FloorPlan2DCanvas(
                 room: room,
+                importedPlan: room.importedPlan,
+                displayMode: locateDisplayMode,
                 showGrid: true,
                 showDimensions: false,
                 isMetric: true,

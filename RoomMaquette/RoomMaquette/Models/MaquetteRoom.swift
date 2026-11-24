@@ -18,6 +18,9 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
     // Cached USDZ data when captured via RoomPlan
     public var usdzData: Data?
     
+    // Optional imported architectural blueprint / CAD plan
+    public var importedPlan: ImportedPlan?
+    
     public init(
         id: UUID = UUID(),
         name: String = "Scanned Room",
@@ -29,7 +32,8 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
         windows: [WindowSurface] = [],
         openings: [OpeningSurface] = [],
         objects: [FurnitureObject] = [],
-        usdzData: Data? = nil
+        usdzData: Data? = nil,
+        importedPlan: ImportedPlan? = nil
     ) {
         self.id = id
         self.name = name
@@ -42,6 +46,7 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
         self.openings = openings
         self.objects = objects
         self.usdzData = usdzData
+        self.importedPlan = importedPlan
     }
     
     // MARK: - Initializer from Apple RoomPlan CapturedRoom
@@ -53,6 +58,7 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
         self.modifiedAt = Date()
         self.notes = "Scanned with iPhone Pro LiDAR and RoomPlan"
         self.usdzData = usdzData
+        self.importedPlan = nil
         
         // 1. Walls
         self.walls = capturedRoom.walls.map { wall in

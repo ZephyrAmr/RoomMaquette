@@ -42,6 +42,10 @@
 		A11100010000000000000002 /* RoomLocateMeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11100020000000000000002 /* RoomLocateMeView.swift */; };
 		A11100010000000000000003 /* AddFurnitureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11100020000000000000003 /* AddFurnitureSheet.swift */; };
 		A11100010000000000000004 /* SelectedItemInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11100020000000000000004 /* SelectedItemInspectorView.swift */; };
+		B11100010000000000000001 /* ImportedPlanModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11100020000000000000001 /* ImportedPlanModel.swift */; };
+		B11100010000000000000002 /* PlanImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11100020000000000000002 /* PlanImporter.swift */; };
+		B11100010000000000000003 /* PlanAutoMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11100020000000000000003 /* PlanAutoMatcher.swift */; };
+		B11100010000000000000004 /* PlanMatchingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11100020000000000000004 /* PlanMatchingView.swift */; };
 		536C1F7229F32371F19E0950 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F5711A4F8FE991CF76A72175 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -82,6 +86,10 @@
 		A11100020000000000000002 /* RoomLocateMeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RoomLocateMeView.swift"; sourceTree = "<group>"; };
 		A11100020000000000000003 /* AddFurnitureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AddFurnitureSheet.swift"; sourceTree = "<group>"; };
 		A11100020000000000000004 /* SelectedItemInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SelectedItemInspectorView.swift"; sourceTree = "<group>"; };
+		B11100020000000000000001 /* ImportedPlanModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ImportedPlanModel.swift"; sourceTree = "<group>"; };
+		B11100020000000000000002 /* PlanImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PlanImporter.swift"; sourceTree = "<group>"; };
+		B11100020000000000000003 /* PlanAutoMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PlanAutoMatcher.swift"; sourceTree = "<group>"; };
+		B11100020000000000000004 /* PlanMatchingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PlanMatchingView.swift"; sourceTree = "<group>"; };
 		F5711A4F8FE991CF76A72175 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
 		2E7FD93E293410983D756A14 /* RoomMaquette.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomMaquette.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -114,6 +122,7 @@
 				16D8BA8C0729F1F6CEDDBFC0 /* MaquetteBuilding.swift */,
 				99098DDE208FF2B42555737A /* SampleRooms.swift */,
 				D1D015CBF6AD39B51DBBFE6F /* ProjectStore.swift */,
+				B11100020000000000000001 /* ImportedPlanModel.swift */,
 			);
 			path = Models; sourceTree = "<group>";
 		};
@@ -166,8 +175,17 @@
 				A11100020000000000000002 /* RoomLocateMeView.swift */,
 				A11100020000000000000003 /* AddFurnitureSheet.swift */,
 				A11100020000000000000004 /* SelectedItemInspectorView.swift */,
+				B11100020000000000000004 /* PlanMatchingView.swift */,
 			);
 			path = Views; sourceTree = "<group>";
+		};
+		B11100030000000000000001 /* Importers */ = {
+			isa = PBXGroup;
+			children = (
+				B11100020000000000000002 /* PlanImporter.swift */,
+				B11100020000000000000003 /* PlanAutoMatcher.swift */,
+			);
+			path = Importers; sourceTree = "<group>";
 		};
 		2F1C53B32D1773462AD4ECD7 /* Assets */ = {
 			isa = PBXGroup;
@@ -181,6 +199,7 @@
 			children = (
 				6E91E962F271651E5DB63502 /* App */,
 				791DB8710C9B711EEDC3A50F /* Models */,
+				B11100030000000000000001 /* Importers */,
 				E2C01352EBC53E5845177C36 /* Capture */,
 				6FA2275351DC43E6985E6ED6 /* Renderers */,
 				8120DECB7F9F097717AC077F /* Exporters */,
@@ -310,6 +329,10 @@
 				A11100010000000000000002 /* RoomLocateMeView.swift in Sources */,
 				A11100010000000000000003 /* AddFurnitureSheet.swift in Sources */,
 				A11100010000000000000004 /* SelectedItemInspectorView.swift in Sources */,
+				B11100010000000000000001 /* ImportedPlanModel.swift in Sources */,
+				B11100010000000000000002 /* PlanImporter.swift in Sources */,
+				B11100010000000000000003 /* PlanAutoMatcher.swift in Sources */,
+				B11100010000000000000004 /* PlanMatchingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

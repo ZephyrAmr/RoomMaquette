@@ -6,7 +6,10 @@ public struct FloorPlanTabView: View {
     public var selectedObjectId: UUID? = nil
     public var onSelectObject: ((UUID?) -> Void)? = nil
     public var onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil
+    public var onImportPlan: (() -> Void)? = nil
+    public var onAlignPlan: (() -> Void)? = nil
     
+    @State private var displayMode: FloorPlanDisplayMode = .scannedPlan
     @State private var showGrid: Bool = true
     @State private var showDimensions: Bool = true
     @State private var isMetric: Bool = true
@@ -15,18 +18,24 @@ public struct FloorPlanTabView: View {
         room: MaquetteRoom,
         selectedObjectId: UUID? = nil,
         onSelectObject: ((UUID?) -> Void)? = nil,
-        onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil
+        onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil,
+        onImportPlan: (() -> Void)? = nil,
+        onAlignPlan: (() -> Void)? = nil
     ) {
         self.room = room
         self.selectedObjectId = selectedObjectId
         self.onSelectObject = onSelectObject
         self.onMoveObject = onMoveObject
+        self.onImportPlan = onImportPlan
+        self.onAlignPlan = onAlignPlan
     }
     
     public var body: some View {
         ZStack {
             FloorPlan2DCanvas(
                 room: room,
+                importedPlan: room.importedPlan,
+                displayMode: displayMode,
                 showGrid: showGrid,
                 showDimensions: showDimensions,
                 isMetric: isMetric,
@@ -35,10 +44,56 @@ public struct FloorPlanTabView: View {
                 onMoveObject: onMoveObject
             )
             
-            // Floating Toolbar at the bottom
+            // Top Floating Plan Selector / Import Bar
             VStack {
+                HStack(spacing: 8) {
+                    if let plan = room.importedPlan {
+                        Picker("Plan Mode", selection: $displayMode) {
+                            Text("Scan").tag(FloorPlanDisplayMode.scannedPlan)
+                            Text("Blueprint").tag(FloorPlanDisplayMode.importedBlueprint)
+                            Text("Composite").tag(FloorPlanDisplayMode.compositeOverlay)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 240)
+                        
+                        Button {
+                            onAlignPlan?()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "slider.horizontal.2.square")
+                                Text("Align")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .foregroundColor(.blue)
+                        }
+                    } else {
+                        Button {
+                            onImportPlan?()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.badge.plus")
+                                Text("Import Architectural Plan")
+                                    .font(.system(size: 12, weight: .bold))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .foregroundColor(.blue)
+                            .shadow(radius: 2)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                
                 Spacer()
                 
+                // Floating Toolbar at the bottom
                 HStack(spacing: 12) {
                     // Grid Toggle
                     Button {

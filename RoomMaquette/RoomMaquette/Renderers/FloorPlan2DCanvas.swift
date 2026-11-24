@@ -1,8 +1,26 @@
 import SwiftUI
 import simd
 
+public enum FloorPlanDisplayMode: String, CaseIterable, Identifiable {
+    case scannedPlan = "Scanned 2D"
+    case importedBlueprint = "Blueprint"
+    case compositeOverlay = "Composite"
+    
+    public var id: String { rawValue }
+    
+    public var icon: String {
+        switch self {
+        case .scannedPlan: return "square.split.diagonal.2x2"
+        case .importedBlueprint: return "doc.richtext"
+        case .compositeOverlay: return "square.2.layers.3d"
+        }
+    }
+}
+
 public struct FloorPlan2DCanvas: View {
     public var room: MaquetteRoom
+    public var importedPlan: ImportedPlan? = nil
+    public var displayMode: FloorPlanDisplayMode = .scannedPlan
     public var showGrid: Bool = true
     public var showDimensions: Bool = true
     public var isMetric: Bool = true
@@ -22,6 +40,8 @@ public struct FloorPlan2DCanvas: View {
     
     public init(
         room: MaquetteRoom,
+        importedPlan: ImportedPlan? = nil,
+        displayMode: FloorPlanDisplayMode = .scannedPlan,
         showGrid: Bool = true,
         showDimensions: Bool = true,
         isMetric: Bool = true,
@@ -34,6 +54,8 @@ public struct FloorPlan2DCanvas: View {
         onTapPlanCoordinate: ((SIMD3<Float>) -> Void)? = nil
     ) {
         self.room = room
+        self.importedPlan = importedPlan
+        self.displayMode = displayMode
         self.showGrid = showGrid
         self.showDimensions = showDimensions
         self.isMetric = isMetric
@@ -50,27 +72,74 @@ public struct FloorPlan2DCanvas: View {
         GeometryReader { proxy in
             let viewSize = proxy.size
             let bounds = room.boundingBox
-            let roomW = max(bounds.max.x - bounds.min.x, 2.0)
-            let roomD = max(bounds.max.z - bounds.min.z, 2.0)
             
-            // Calculate base scale to fit room nicely with padding
-            let fitScaleX = (viewSize.width - 100) / CGFloat(roomW)
-            let fitScaleY = (viewSize.height - 100) / CGFloat(roomD)
+            // Coordinate frame sizing
+            let planW: CGFloat
+            let planD: CGFloat
+            let centerX: CGFloat
+            let centerZ: CGFloat
+            
+            if displayMode == .importedBlueprint, let plan = importedPlan {
+                planW = CGFloat(max(plan.originalWidthMeters, 2.0))
+                planD = CGFloat(max(plan.originalDepthMeters, 2.0))
+                centerX = 0.0
+                centerZ = 0.0
+            } else {
+                planW = CGFloat(max(bounds.max.x - bounds.min.x, 2.0))
+                planD = CGFloat(max(bounds.max.z - bounds.min.z, 2.0))
+                centerX = CGFloat(bounds.min.x + bounds.max.x) / 2.0
+                centerZ = CGFloat(bounds.min.z + bounds.max.z) / 2.0
+            }
+            
+            // Calculate base scale to fit room/blueprint nicely with padding
+            let fitScaleX = (viewSize.width - 100) / planW
+            let fitScaleY = (viewSize.height - 100) / planD
             let baseScale = min(fitScaleX, fitScaleY)
-            
-            let centerX = CGFloat(bounds.min.x + bounds.max.x) / 2.0
-            let centerZ = CGFloat(bounds.min.z + bounds.max.z) / 2.0
+            let midX = viewSize.width / 2.0 + offset.width
+            let midY = viewSize.height / 2.0 + offset.height
+            let currentScale = baseScale * scale
             
             ZStack {
                 // Background Blueprint Paper
                 Color(UIColor.systemGroupedBackground)
                     .ignoresSafeArea()
                 
-                Canvas { context, size in
-                    let midX = size.width / 2.0 + offset.width
-                    let midY = size.height / 2.0 + offset.height
-                    let currentScale = baseScale * scale
+                // Optional Raster Blueprint Image Underlay
+                if (displayMode == .importedBlueprint || displayMode == .compositeOverlay),
+                   let plan = importedPlan,
+                   let data = plan.renderedImageData,
+                   let uiImage = UIImage(data: data) {
+                    let imgW = CGFloat(plan.originalWidthMeters) * currentScale
+                    let imgH = CGFloat(plan.originalDepthMeters) * currentScale
                     
+                    let imgCenterX: CGFloat
+                    let imgCenterY: CGFloat
+                    let imgRotation: Angle
+                    
+                    if displayMode == .compositeOverlay {
+                        let align = plan.alignment
+                        imgRotation = Angle(radians: Double(-align.rotationAngle))
+                        let unrotDX = CGFloat(-align.offsetX) * currentScale
+                        let unrotDZ = CGFloat(-align.offsetZ) * currentScale
+                        imgCenterX = midX + unrotDX
+                        imgCenterY = midY + unrotDZ
+                    } else {
+                        imgCenterX = midX
+                        imgCenterY = midY
+                        imgRotation = .zero
+                    }
+                    
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: imgW, height: imgH)
+                        .rotationEffect(imgRotation)
+                        .position(x: imgCenterX, y: imgCenterY)
+                        .opacity(displayMode == .compositeOverlay ? 0.55 : 0.95)
+                        .shadow(color: Color.black.opacity(0.12), radius: 6)
+                }
+                
+                Canvas { context, size in
                     func toCanvasPoint(_ rx: Float, _ rz: Float) -> CGPoint {
                         let dx = CGFloat(rx) - centerX
                         let dz = CGFloat(rz) - centerZ
@@ -85,39 +154,58 @@ public struct FloorPlan2DCanvas: View {
                         drawGrid(context: &context, size: size, midX: midX, midY: midY, currentScale: currentScale)
                     }
                     
-                    // 2. Draw Floor Fill
-                    drawFloorPolygon(context: &context, bounds: bounds, toCanvas: toCanvasPoint)
-                    
-                    // 3. Draw Furniture / Objects
-                    drawFurniture(
-                        context: &context,
-                        objects: room.objects,
-                        selectedId: selectedObjectId,
-                        toCanvas: toCanvasPoint,
-                        currentScale: currentScale
-                    )
-                    
-                    // 4. Draw Walls
-                    drawWalls(context: &context, walls: room.walls, toCanvas: toCanvasPoint, currentScale: currentScale)
-                    
-                    // 5. Draw Doors
-                    drawDoors(context: &context, doors: room.doors, toCanvas: toCanvasPoint, currentScale: currentScale)
-                    
-                    // 6. Draw Windows
-                    drawWindows(context: &context, windows: room.windows, toCanvas: toCanvasPoint, currentScale: currentScale)
-                    
-                    // 7. Draw Dimension Lines
-                    if showDimensions {
-                        drawDimensions(context: &context, bounds: bounds, room: room, toCanvas: toCanvasPoint, currentScale: currentScale)
+                    // 2. Draw Vector CAD Blueprint Lines if present
+                    if (displayMode == .importedBlueprint || displayMode == .compositeOverlay),
+                       let plan = importedPlan, !plan.vectorLines.isEmpty {
+                        drawBlueprintVectorLines(
+                            context: &context,
+                            lines: plan.vectorLines,
+                            alignment: plan.alignment,
+                            isBlueprintSpace: displayMode == .importedBlueprint,
+                            toCanvas: toCanvasPoint
+                        )
                     }
                     
-                    // 8. Room Name & Area Badge
-                    drawRoomBadge(context: &context, room: room, toCanvas: toCanvasPoint)
+                    // 3. Draw Scanned Geometry when not in pure blueprint mode
+                    if displayMode != .importedBlueprint {
+                        // Floor Fill
+                        drawFloorPolygon(context: &context, bounds: bounds, toCanvas: toCanvasPoint)
+                        
+                        // Furniture / Objects
+                        drawFurniture(
+                            context: &context,
+                            objects: room.objects,
+                            selectedId: selectedObjectId,
+                            toCanvas: toCanvasPoint,
+                            currentScale: currentScale
+                        )
+                        
+                        // Walls, Doors, Windows
+                        drawWalls(context: &context, walls: room.walls, toCanvas: toCanvasPoint, currentScale: currentScale)
+                        drawDoors(context: &context, doors: room.doors, toCanvas: toCanvasPoint, currentScale: currentScale)
+                        drawWindows(context: &context, windows: room.windows, toCanvas: toCanvasPoint, currentScale: currentScale)
+                        
+                        // Dimension Lines
+                        if showDimensions {
+                            drawDimensions(context: &context, bounds: bounds, room: room, toCanvas: toCanvasPoint, currentScale: currentScale)
+                        }
+                        
+                        // Room Name & Area Badge
+                        drawRoomBadge(context: &context, room: room, toCanvas: toCanvasPoint)
+                    }
                     
-                    // 9. Live User Location Puck (Locate Me AR Mode)
+                    // 4. Live User Location Puck (Locate Me AR Mode)
                     if let userPos = userPosition {
-                        let puckCanvas = toCanvasPoint(userPos.x, userPos.z)
-                        drawUserLocationPuck(context: &context, center: puckCanvas, heading: userHeading)
+                        if displayMode == .importedBlueprint, let plan = importedPlan {
+                            // Map AR/scan position into imported blueprint coordinate space
+                            let planPos = plan.alignment.mapScanToPlan(point: userPos)
+                            let puckCanvas = toCanvasPoint(planPos.x, planPos.z)
+                            let mappedHeading = userHeading.map { $0 + plan.alignment.rotationAngle }
+                            drawUserLocationPuck(context: &context, center: puckCanvas, heading: mappedHeading)
+                        } else {
+                            let puckCanvas = toCanvasPoint(userPos.x, userPos.z)
+                            drawUserLocationPuck(context: &context, center: puckCanvas, heading: userHeading)
+                        }
                     }
                 }
                 .contentShape(Rectangle())
@@ -209,11 +297,21 @@ public struct FloorPlan2DCanvas: View {
         let midX = viewSize.width / 2.0 + offset.width
         let midY = viewSize.height / 2.0 + offset.height
         let currentScale = baseScale * scale
-        let centerX = CGFloat(bounds.min.x + bounds.max.x) / 2.0
-        let centerZ = CGFloat(bounds.min.z + bounds.max.z) / 2.0
+        let centerX: CGFloat = (displayMode == .importedBlueprint) ? 0.0 : CGFloat(bounds.min.x + bounds.max.x) / 2.0
+        let centerZ: CGFloat = (displayMode == .importedBlueprint) ? 0.0 : CGFloat(bounds.min.z + bounds.max.z) / 2.0
         
         let rx = Float((screenPoint.x - midX) / currentScale + centerX)
         let rz = Float((screenPoint.y - midY) / currentScale + centerZ)
+        
+        if displayMode == .importedBlueprint, let plan = importedPlan {
+            // Touch coordinate on blueprint inverted into AR/scan room space
+            let planPt = SIMD3<Float>(rx, 0, rz)
+            let scanPt = plan.alignment.mapPlanToScan(point: planPt)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onTapPlanCoordinate?(scanPt)
+            return
+        }
+        
         let roomPt = SIMD3<Float>(rx, 0, rz)
         
         // Check furniture object hits
@@ -244,6 +342,36 @@ public struct FloorPlan2DCanvas: View {
     }
     
     // MARK: - Drawing Functions
+    
+    private func drawBlueprintVectorLines(
+        context: inout GraphicsContext,
+        lines: [PlanLine],
+        alignment: PlanAlignmentTransform,
+        isBlueprintSpace: Bool,
+        toCanvas: (Float, Float) -> CGPoint
+    ) {
+        var path = Path()
+        for line in lines {
+            let p1: CGPoint
+            let p2: CGPoint
+            if isBlueprintSpace {
+                p1 = toCanvas(line.startX, line.startZ)
+                p2 = toCanvas(line.endX, line.endZ)
+            } else {
+                let startScan = alignment.mapPlanToScan(point: SIMD3<Float>(line.startX, 0, line.startZ))
+                let endScan = alignment.mapPlanToScan(point: SIMD3<Float>(line.endX, 0, line.endZ))
+                p1 = toCanvas(startScan.x, startScan.z)
+                p2 = toCanvas(endScan.x, endScan.z)
+            }
+            path.move(to: p1)
+            path.addLine(to: p2)
+        }
+        context.stroke(
+            path,
+            with: .color(Color.blue.opacity(0.85)),
+            style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+        )
+    }
     
     private func drawGrid(context: inout GraphicsContext, size: CGSize, midX: CGFloat, midY: CGFloat, currentScale: CGFloat) {
         let gridSpacing: CGFloat = currentScale * (isMetric ? 1.0 : 0.9144)

@@ -1,5 +1,6 @@
 import SwiftUI
 import QuickLook
+import UniformTypeIdentifiers
 import simd
 
 public struct MaquetteWorkspaceView: View {
@@ -14,6 +15,10 @@ public struct MaquetteWorkspaceView: View {
     @State private var showExportSheet: Bool = false
     @State private var showLocateMeSheet: Bool = false
     @State private var showAddFurnitureSheet: Bool = false
+    @State private var showFileImporter: Bool = false
+    @State private var showPlanMatchingSheet: Bool = false
+    @State private var importErrorMessage: String? = nil
+    @State private var showImportErrorAlert: Bool = false
     @State private var quickLookURL: URL? = nil
     @State private var selectedObjectId: UUID? = nil
     @State private var isPreparingAR: Bool = false
@@ -92,6 +97,34 @@ public struct MaquetteWorkspaceView: View {
                         .fontWeight(.semibold)
                 }
                 
+                // Architectural Blueprint Menu
+                Menu {
+                    Button {
+                        showFileImporter = true
+                    } label: {
+                        Label("Import Blueprint / Plan", systemImage: "doc.badge.plus")
+                    }
+                    
+                    if room.importedPlan != nil {
+                        Button {
+                            showPlanMatchingSheet = true
+                        } label: {
+                            Label("Align Blueprint to Scan", systemImage: "slider.horizontal.2.square")
+                        }
+                        
+                        Button(role: .destructive) {
+                            withAnimation {
+                                room.importedPlan = nil
+                            }
+                            persistRoom()
+                        } label: {
+                            Label("Remove Blueprint", systemImage: "trash")
+                        }
+                    }
+                } label: {
+                    Image(systemName: room.importedPlan != nil ? "doc.richtext.fill" : "doc.badge.plus")
+                }
+                
                 // Add Furniture Button
                 Button {
                     showAddFurnitureSheet = true
@@ -115,6 +148,33 @@ public struct MaquetteWorkspaceView: View {
                 addNewFurniture(template: template)
             }
         }
+        .sheet(isPresented: $showPlanMatchingSheet) {
+            if room.importedPlan != nil {
+                PlanMatchingView(
+                    room: room,
+                    plan: Binding(
+                        get: { room.importedPlan! },
+                        set: { room.importedPlan = $0 }
+                    ),
+                    onSave: { newTransform in
+                        room.importedPlan?.alignment = newTransform
+                        persistRoom()
+                    }
+                )
+            }
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.pdf, .image, .item, .data]
+        ) { result in
+            switch result {
+            case .success(let url):
+                handlePlanImport(from: url)
+            case .failure(let error):
+                importErrorMessage = error.localizedDescription
+                showImportErrorAlert = true
+            }
+        }
         .fullScreenCover(isPresented: $showLocateMeSheet) {
             RoomLocateMeView(room: room)
         }
@@ -123,6 +183,11 @@ public struct MaquetteWorkspaceView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(arErrorMessage ?? "Could not prepare the 3D model for Augmented Reality preview.")
+        }
+        .alert("Import Error", isPresented: $showImportErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importErrorMessage ?? "Failed to import plan.")
         }
     }
     
@@ -253,6 +318,12 @@ public struct MaquetteWorkspaceView: View {
             },
             onMoveObject: { uuid, newPos in
                 nudgeSelectedObjectTo(id: uuid, targetPos: newPos)
+            },
+            onImportPlan: {
+                showFileImporter = true
+            },
+            onAlignPlan: {
+                showPlanMatchingSheet = true
             }
         )
     }
@@ -371,6 +442,26 @@ public struct MaquetteWorkspaceView: View {
                     self.showARErrorAlert = true
                 }
             }
+        }
+    }
+    
+    // MARK: - Plan Import & Auto-Alignment
+    
+    private func handlePlanImport(from url: URL) {
+        do {
+            var imported = try PlanImporter.import(from: url)
+            let autoTransform = PlanAutoMatcher.match(scan: room, plan: imported)
+            imported.alignment = autoTransform
+            withAnimation {
+                self.room.importedPlan = imported
+            }
+            persistRoom()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.showPlanMatchingSheet = true
+            }
+        } catch {
+            self.importErrorMessage = error.localizedDescription
+            self.showImportErrorAlert = true
         }
     }
 }
