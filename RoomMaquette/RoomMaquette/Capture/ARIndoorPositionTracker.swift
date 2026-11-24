@@ -1292,7 +1292,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             let obj = rf.object
             guard max(obj.width, obj.depth) >= 0.40 && obj.height >= 0.30 else { continue }
             
-            let objCenterAR = roomToAR(rf.pos.x, obj.position.y, rf.pos.z)
+            let objCenterAR = roomToAR(rf.pos.x, obj.position.y, rf.pos.y)
             let camDist = simd_distance(camPosAR, objCenterAR)
             guard camDist >= 0.90 && camDist <= 4.0 else { continue }
             
@@ -1313,7 +1313,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             
             // Project center into camera frame & check depth
             let localPt = simd_mul(invCamT, SIMD4<Float>(objCenterAR, 1.0))
-            let expectedDepth = -localPt.z
+            let expectedDepth: Float = -localPt.z
             guard expectedDepth >= 0.85 else { continue }
             guard abs(localPt.x / expectedDepth) < 0.30 && abs(localPt.y / expectedDepth) < 0.25 else { continue }
             
@@ -1321,16 +1321,18 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             let vCenter = Int(cy - fy * (localPt.y / expectedDepth))
             guard uCenter >= 6 && uCenter < dW - 6 && vCenter >= 6 && vCenter < dH - 6 else { continue }
             
-            let objHalfExtent = max(rf.halfW, rf.halfD)
-            let offsets = [(0, 0), (-5, 0), (5, 0), (0, -4), (0, 4)]
+            let objHalfExtent: Float = max(rf.halfW, rf.halfD)
+            let seeThroughThresh: Float = expectedDepth + objHalfExtent + 0.35
+            let hitObjThresh: Float = objHalfExtent + 0.25
+            let offsets: [(Int, Int)] = [(0, 0), (-5, 0), (5, 0), (0, -4), (0, 4)]
             var seeThroughCount = 0
             var hitObjectCount = 0
             for (du, dv) in offsets {
-                let dMeas = dFloats[(vCenter + dv) * dW + (uCenter + du)]
+                let dMeas: Float = dFloats[(vCenter + dv) * dW + (uCenter + du)]
                 guard dMeas.isFinite && dMeas > 0.3 else { continue }
-                if dMeas > expectedDepth + objHalfExtent + 0.35 {
+                if dMeas > seeThroughThresh {
                     seeThroughCount += 1
-                } else if abs(dMeas - expectedDepth) <= objHalfExtent + 0.25 {
+                } else if abs(dMeas - expectedDepth) <= hitObjThresh {
                     hitObjectCount += 1
                 }
             }
