@@ -15,6 +15,8 @@ public class PlanImporter {
         
         let ext = url.pathExtension.lowercased()
         let planName = url.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
         
         switch ext {
         case "pdf":
@@ -36,7 +38,69 @@ public class PlanImporter {
         }
     }
     
-    // MARK: - PDF Blueprint Importer
+    /// Converts an ImportedPlan directly into a playable MaquetteRoom with synthesized walls & boundaries
+    public static func createRoom(from plan: ImportedPlan, name: String? = nil) -> MaquetteRoom {
+        let roomName = (name ?? plan.name).trimmingCharacters(in: .whitespaces)
+        let ceilingH: Float = 2.60
+        
+        var walls: [WallSurface] = []
+        for line in plan.vectorLines {
+            let wallLen = line.length
+            guard wallLen >= 0.4 else { continue }
+            let midX = (line.startX + line.endX) / 2.0
+            let midZ = (line.startZ + line.endZ) / 2.0
+            let ang = line.angle
+            
+            let cosA = cos(ang)
+            let sinA = sin(ang)
+            let rotMat = simd_float4x4(
+                SIMD4<Float>(cosA, 0, sinA, 0),
+                SIMD4<Float>(0, 1, 0, 0),
+                SIMD4<Float>(-sinA, 0, cosA, 0),
+                SIMD4<Float>(midX, ceilingH / 2.0, midZ, 1)
+            )
+            walls.append(WallSurface(id: UUID(), dimensions: SIMD3<Float>(wallLen, ceilingH, 0.15), transform: rotMat))
+        }
+        
+        // If plan has no lines, synthesize perimeter box
+        if walls.isEmpty {
+            let hw = plan.originalWidthMeters / 2.0
+            let hd = plan.originalDepthMeters / 2.0
+            let perimLines = [
+                PlanLine(startX: -hw, startZ: -hd, endX: hw, endZ: -hd),
+                PlanLine(startX: hw, startZ: -hd, endX: hw, endZ: hd),
+                PlanLine(startX: hw, startZ: hd, endX: -hw, endZ: hd),
+                PlanLine(startX: -hw, startZ: hd, endX: -hw, endZ: -hd)
+            ]
+            for l in perimLines {
+                let mx = (l.startX + l.endX)/2.0
+                let mz = (l.startZ + l.endZ)/2.0
+                let ang = l.angle
+                let rotMat = simd_float4x4(
+                    SIMD4<Float>(cos(ang), 0, sin(ang), 0),
+                    SIMD4<Float>(0, 1, 0, 0),
+                    SIMD4<Float>(-sin(ang), 0, cos(ang), 0),
+                    SIMD4<Float>(mx, ceilingH / 2.0, mz, 1)
+                )
+                walls.append(WallSurface(id: UUID(), dimensions: SIMD3<Float>(l.length, ceilingH, 0.15), transform: rotMat))
+            }
+        }
+        
+        return MaquetteRoom(
+            id: UUID(),
+            name: roomName.isEmpty ? "Imported Plan Room" : roomName,
+            createdAt: Date(),
+            modifiedAt: Date(),
+            notes: "Created from imported plan: \(plan.name)",
+            walls: walls,
+            doors: [],
+            windows: [],
+            objects: [],
+            importedPlan: plan
+        )
+    }
+    
+    // MARK: - PDF Blueprint Importer with Vision Vectorization
     
     private static func importPDF(from url: URL, name: String) throws -> ImportedPlan {
         guard let doc = PDFDocument(url: url), let page = doc.page(at: 0) else {
@@ -47,7 +111,7 @@ public class PlanImporter {
         let width = bounds.width
         let height = bounds.height
         
-        // Render 2000px high-resolution raster image of the blueprint page
+        // Render 2048px high-resolution raster image of the blueprint page
         let targetWidth: CGFloat = 2048.0
         let targetHeight = targetWidth * (height / max(width, 1.0))
         let targetSize = CGSize(width: targetWidth, height: targetHeight)
@@ -76,21 +140,20 @@ public class PlanImporter {
             throw NSError(domain: "PlanImporter", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to rasterize PDF page."])
         }
         
-        // Assume default architectural sheet scale (e.g. 15m wide plan)
-        let estWidthMeters: Float = 16.0
-        let estDepthMeters: Float = estWidthMeters * Float(height / max(width, 1.0))
+        // Run AI / Vision line extraction & scale detection
+        let vectorized = PlanImageVectorizer.vectorize(image: image)
         
         return ImportedPlan(
             name: name,
             fileType: .pdf,
-            originalWidthMeters: estWidthMeters,
-            originalDepthMeters: estDepthMeters,
+            originalWidthMeters: vectorized.originalWidthMeters,
+            originalDepthMeters: vectorized.originalDepthMeters,
             renderedImageData: pngData,
-            vectorLines: []
+            vectorLines: vectorized.vectorLines
         )
     }
     
-    // MARK: - Raster Image Importer (PNG, JPG, HEIC)
+    // MARK: - Raster Image Importer with Vision Vectorization (PNG, JPG, HEIC)
     
     private static func importRasterImage(from url: URL, name: String) throws -> ImportedPlan {
         let data = try Data(contentsOf: url)
@@ -98,20 +161,17 @@ public class PlanImporter {
             throw NSError(domain: "PlanImporter", code: 5, userInfo: [NSLocalizedDescriptionKey: "Invalid image file."])
         }
         
-        let w = image.size.width
-        let h = image.size.height
-        let estWidthMeters: Float = 14.0
-        let estDepthMeters: Float = estWidthMeters * Float(h / max(w, 1.0))
-        
+        // Vectorize image: extract walls and detect metric scale with Vision OCR
+        let vectorized = PlanImageVectorizer.vectorize(image: image)
         let compressed = image.jpegData(compressionQuality: 0.85) ?? data
         
         return ImportedPlan(
             name: name,
             fileType: .image,
-            originalWidthMeters: estWidthMeters,
-            originalDepthMeters: estDepthMeters,
+            originalWidthMeters: vectorized.originalWidthMeters,
+            originalDepthMeters: vectorized.originalDepthMeters,
             renderedImageData: compressed,
-            vectorLines: []
+            vectorLines: vectorized.vectorLines
         )
     }
     
@@ -137,7 +197,6 @@ public class PlanImporter {
                 var x2: Float?
                 var y2: Float?
                 
-                // Read following group codes
                 while i < lines.count - 1 {
                     i += 1
                     let code = lines[i].trimmingCharacters(in: .whitespaces)
@@ -173,16 +232,14 @@ public class PlanImporter {
         let spanX = max(maxX - minX, 1.0)
         let spanZ = max(maxZ - minZ, 1.0)
         
-        // Render crisp CAD blueprint image from extracted lines
+        // Render CAD blueprint image from extracted lines
         let imgSize = CGSize(width: 1600, height: 1600 * CGFloat(spanZ / spanX))
         UIGraphicsBeginImageContextWithOptions(imgSize, true, 1.0)
         let ctx = UIGraphicsGetCurrentContext()!
         
-        // Deep blueprint background
         ctx.setFillColor(UIColor(red: 0.05, green: 0.12, blue: 0.28, alpha: 1.0).cgColor)
         ctx.fill(CGRect(origin: .zero, size: imgSize))
         
-        // White CAD lines
         ctx.setStrokeColor(UIColor.white.cgColor)
         ctx.setLineWidth(2.0)
         
@@ -213,20 +270,122 @@ public class PlanImporter {
         )
     }
     
-    // MARK: - SVG Vector Importer
+    // MARK: - SVG Vector Importer with XML Parsing & Visual Rendering
     
     private static func importSVG(from url: URL, name: String) throws -> ImportedPlan {
         let content = try String(contentsOf: url, encoding: .utf8)
-        let estWidthMeters: Float = 12.0
-        let estDepthMeters: Float = 12.0
+        var parsedLines: [PlanLine] = []
+        
+        // 1. Detect SVG viewBox or width/height
+        var vbW: Float = 1000.0
+        var vbH: Float = 1000.0
+        if let vbMatch = content.range(of: #"viewBox\s*=\s*\"([^\"]+)\""#, options: .regularExpression) {
+            let vbStr = content[vbMatch]
+                .replacingOccurrences(of: "viewBox=", with: "")
+                .replacingOccurrences(of: "\"", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            let parts = vbStr.split(separator: " ").compactMap { Float($0) }
+            if parts.count >= 4 {
+                vbW = max(parts[2], 10.0)
+                vbH = max(parts[3], 10.0)
+            }
+        }
+        
+        // 2. Parse <line> elements: x1, y1, x2, y2
+        let linePattern = #"<line\s+[^>]*x1\s*=\s*\"([0-9.]+)\"[^>]*y1\s*=\s*\"([0-9.]+)\"[^>]*x2\s*=\s*\"([0-9.]+)\"[^>]*y2\s*=\s*\"([0-9.]+)\""#
+        if let regex = try? NSRegularExpression(pattern: linePattern, options: .caseInsensitive) {
+            let nsContent = content as NSString
+            let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+            for m in matches {
+                if m.numberOfRanges >= 5,
+                   let x1 = Float(nsContent.substring(with: m.range(at: 1))),
+                   let y1 = Float(nsContent.substring(with: m.range(at: 2))),
+                   let x2 = Float(nsContent.substring(with: m.range(at: 3))),
+                   let y2 = Float(nsContent.substring(with: m.range(at: 4))) {
+                    parsedLines.append(PlanLine(startX: x1, startZ: y1, endX: x2, endZ: y2))
+                }
+            }
+        }
+        
+        // 3. Parse <rect> elements: x, y, width, height
+        let rectPattern = #"<rect\s+[^>]*x\s*=\s*\"([0-9.]+)\"[^>]*y\s*=\s*\"([0-9.]+)\"[^>]*width\s*=\s*\"([0-9.]+)\"[^>]*height\s*=\s*\"([0-9.]+)\""#
+        if let regex = try? NSRegularExpression(pattern: rectPattern, options: .caseInsensitive) {
+            let nsContent = content as NSString
+            let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+            for m in matches {
+                if m.numberOfRanges >= 5,
+                   let rx = Float(nsContent.substring(with: m.range(at: 1))),
+                   let ry = Float(nsContent.substring(with: m.range(at: 2))),
+                   let rw = Float(nsContent.substring(with: m.range(at: 3))),
+                   let rh = Float(nsContent.substring(with: m.range(at: 4))) {
+                    // Skip canvas-sized background rects
+                    if rw < vbW * 0.96 || rh < vbH * 0.96 {
+                        parsedLines.append(PlanLine(startX: rx, startZ: ry, endX: rx + rw, endZ: ry))
+                        parsedLines.append(PlanLine(startX: rx + rw, startZ: ry, endX: rx + rw, endZ: ry + rh))
+                        parsedLines.append(PlanLine(startX: rx + rw, startZ: ry + rh, endX: rx, endZ: ry + rh))
+                        parsedLines.append(PlanLine(startX: rx, startZ: ry + rh, endX: rx, endZ: ry))
+                    }
+                }
+            }
+        }
+        
+        // 4. Render SVG into a high-contrast architectural blueprint image for underlay
+        let renderW: CGFloat = 1600.0
+        let renderH = renderW * CGFloat(vbH / max(vbW, 1.0))
+        let renderSize = CGSize(width: renderW, height: renderH)
+        
+        UIGraphicsBeginImageContextWithOptions(renderSize, true, 1.0)
+        let ctx = UIGraphicsGetCurrentContext()!
+        ctx.setFillColor(UIColor(red: 0.98, green: 0.98, blue: 0.99, alpha: 1.0).cgColor)
+        ctx.fill(CGRect(origin: .zero, size: renderSize))
+        
+        let scaleX = renderW / CGFloat(vbW)
+        let scaleY = renderH / CGFloat(vbH)
+        
+        ctx.setStrokeColor(UIColor(red: 0.1, green: 0.12, blue: 0.2, alpha: 1.0).cgColor)
+        ctx.setLineWidth(3.0)
+        for line in parsedLines {
+            ctx.move(to: CGPoint(x: CGFloat(line.startX) * scaleX, y: CGFloat(line.startZ) * scaleY))
+            ctx.addLine(to: CGPoint(x: CGFloat(line.endX) * scaleX, y: CGFloat(line.endZ) * scaleY))
+        }
+        ctx.strokePath()
+        
+        let renderedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        let renderedPngData = renderedImage?.pngData()
+        
+        // 5. Convert parsed lines to centered metric space (~14m span)
+        let estWidthMeters: Float = 14.0
+        let mpp = estWidthMeters / vbW
+        let estDepthMeters = vbH * mpp
+        let midX = vbW / 2.0
+        let midZ = vbH / 2.0
+        
+        var metricLines: [PlanLine] = []
+        for l in parsedLines {
+            let x1 = (l.startX - midX) * mpp
+            let z1 = (l.startZ - midZ) * mpp
+            let x2 = (l.endX - midX) * mpp
+            let z2 = (l.endZ - midZ) * mpp
+            let mLine = PlanLine(startX: x1, startZ: z1, endX: x2, endZ: z2)
+            if mLine.length > 0.3 {
+                metricLines.append(mLine)
+            }
+        }
+        
+        // If parsed lines were sparse (e.g. paths), vectorize the rendered bitmap
+        if metricLines.count < 4, let img = renderedImage {
+            let vectorized = PlanImageVectorizer.vectorize(image: img)
+            metricLines = vectorized.vectorLines
+        }
         
         return ImportedPlan(
             name: name,
             fileType: .svg,
             originalWidthMeters: estWidthMeters,
             originalDepthMeters: estDepthMeters,
-            renderedImageData: nil,
-            vectorLines: [],
+            renderedImageData: renderedPngData,
+            vectorLines: metricLines,
             sourceText: content
         )
     }
@@ -245,8 +404,8 @@ public class PlanImporter {
             return ImportedPlan(
                 name: room.name,
                 fileType: .json,
-                originalWidthMeters: b.max.x - b.min.x,
-                originalDepthMeters: b.max.z - b.min.z,
+                originalWidthMeters: max(b.max.x - b.min.x, 6.0),
+                originalDepthMeters: max(b.max.z - b.min.z, 6.0),
                 renderedImageData: nil,
                 vectorLines: lines
             )

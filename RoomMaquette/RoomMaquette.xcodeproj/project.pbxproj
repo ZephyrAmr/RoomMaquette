@@ -48,6 +48,7 @@
 		B11100010000000000000004 /* PlanMatchingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11100020000000000000004 /* PlanMatchingView.swift */; };
 		C11100010000000000000001 /* ScanImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C11100020000000000000001 /* ScanImporter.swift */; };
 		C11100010000000000000002 /* AddArchitecturalElementSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C11100020000000000000002 /* AddArchitecturalElementSheet.swift */; };
+		C11100010000000000000004 /* PlanImageVectorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C11100020000000000000004 /* PlanImageVectorizer.swift */; };
 		536C1F7229F32371F19E0950 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F5711A4F8FE991CF76A72175 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -94,6 +95,7 @@
 		B11100020000000000000004 /* PlanMatchingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PlanMatchingView.swift"; sourceTree = "<group>"; };
 		C11100020000000000000001 /* ScanImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanImporter.swift"; sourceTree = "<group>"; };
 		C11100020000000000000002 /* AddArchitecturalElementSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AddArchitecturalElementSheet.swift"; sourceTree = "<group>"; };
+		C11100020000000000000004 /* PlanImageVectorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PlanImageVectorizer.swift"; sourceTree = "<group>"; };
 		F5711A4F8FE991CF76A72175 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
 		2E7FD93E293410983D756A14 /* RoomMaquette.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomMaquette.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -190,6 +192,7 @@
 				B11100020000000000000002 /* PlanImporter.swift */,
 				B11100020000000000000003 /* PlanAutoMatcher.swift */,
 				C11100020000000000000001 /* ScanImporter.swift */,
+				C11100020000000000000004 /* PlanImageVectorizer.swift */,
 			);
 			path = Importers; sourceTree = "<group>";
 		};
@@ -341,6 +344,7 @@
 				B11100010000000000000004 /* PlanMatchingView.swift in Sources */,
 				C11100010000000000000001 /* ScanImporter.swift in Sources */,
 				C11100010000000000000002 /* AddArchitecturalElementSheet.swift in Sources */,
+				C11100010000000000000004 /* PlanImageVectorizer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

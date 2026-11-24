@@ -83,7 +83,7 @@ public struct HomeDashboardView: View {
                         Button {
                             showingScanImporter = true
                         } label: {
-                            Label("Import Scan (USDZ, JSON, OBJ)", systemImage: "square.and.arrow.down")
+                            Label("Import Scan or Floor Plan (USDZ, Image, PDF, SVG)", systemImage: "square.and.arrow.down")
                         }
                         
                         Divider()
@@ -116,7 +116,7 @@ public struct HomeDashboardView: View {
             }
             .fileImporter(
                 isPresented: $showingScanImporter,
-                allowedContentTypes: [.item, .data, .json]
+                allowedContentTypes: [.item, .data, .json, .image, .pdf]
             ) { result in
                 switch result {
                 case .success(let url):

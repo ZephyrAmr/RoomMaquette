@@ -11,7 +11,7 @@ public enum ScanImportError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidFileFormat(let ext):
-            return "Unsupported scan format: .\(ext). Supported formats are .usdz, .json, and .obj."
+            return "Unsupported format: .\(ext). Supported formats include 3D scans (.usdz, .json, .obj) and floor plans (.png, .jpg, .svg, .pdf, .dxf)."
         case .unreadableData:
             return "Unable to read scan data from the selected file."
         case .sceneParsingFailed:
@@ -46,6 +46,10 @@ public class ScanImporter {
             
         case "obj":
             return try importOBJ(from: url, roomName: fileName)
+            
+        case "png", "jpg", "jpeg", "heic", "svg", "pdf", "dxf":
+            let plan = try PlanImporter.import(from: url)
+            return PlanImporter.createRoom(from: plan, name: fileName)
             
         default:
             throw ScanImportError.invalidFileFormat(ext)
