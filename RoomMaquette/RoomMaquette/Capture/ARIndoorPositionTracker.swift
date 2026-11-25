@@ -15,6 +15,7 @@ public struct ReferenceWallTarget: Identifiable {
     public var offset: Float
     public var angle: Float
     public var displayName: String
+    public var dominantColor: SurfaceColor? = nil
     
     public var length: Float {
         simd_distance(start, end)
@@ -50,6 +51,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     @Published public var localizationConfidence: Float = 0.0
     @Published public var observedWallCount: Int = 0
     @Published public var observedLandmarkCount: Int = 0
+    @Published public var liveCenterColor: SurfaceColor? = nil
+    @Published public var learnedColorsCount: Int = 0
     @Published public var activeDiscrepancy: RoomDiscrepancy? = nil
     
     public var session: ARSession
@@ -62,6 +65,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         var normal: SIMD2<Float>
         var weight: Float
         var timestamp: TimeInterval
+        var color: SurfaceColor? = nil
     }
     
     private enum PortalType: Equatable {
@@ -95,6 +99,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         var pos: SIMD3<Float>
         var kind: Kind
         var timestamp: TimeInterval
+        var color: SurfaceColor? = nil
     }
     
     private struct ClearRay {
@@ -238,6 +243,55 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.newObjectStrikes.removeAll()
     }
     
+    /// Samples live camera colors onto visible walls, doors, and furniture once localized
+    @discardableResult
+    public func captureVisibleColors(into room: inout MaquetteRoom) -> Int {
+        guard isAutoLocalized, let frame = session.currentFrame else { return 0 }
+        transformLock.lock()
+        let yaw = alignmentAngle
+        let offset = alignmentOffset
+        transformLock.unlock()
+        
+        let cosInv = cos(-yaw)
+        let sinInv = sin(-yaw)
+        func toAR(_ rp: SIMD3<Float>) -> SIMD3<Float> {
+            let dx = rp.x - offset.x
+            let dz = rp.z - offset.z
+            let ax = dx * cosInv - dz * sinInv
+            let az = dx * sinInv + dz * cosInv
+            let ay = estimatedFloorY + max(rp.y - roomFloorY, 0.25)
+            return SIMD3<Float>(ax, ay, az)
+        }
+        
+        var updatedCount = 0
+        for i in 0..<room.walls.count {
+            let arPt = toAR(room.walls[i].position)
+            if let col = CameraColorSampler.sampleColor(in: frame, atWorldPoint: arPt, patchRadiusPx: 10) {
+                room.walls[i].dominantColor = room.walls[i].dominantColor?.blended(with: col) ?? col
+                updatedCount += 1
+            }
+        }
+        for i in 0..<room.doors.count {
+            let arPt = toAR(room.doors[i].position)
+            if let col = CameraColorSampler.sampleColor(in: frame, atWorldPoint: arPt, patchRadiusPx: 8) {
+                room.doors[i].dominantColor = room.doors[i].dominantColor?.blended(with: col) ?? col
+                updatedCount += 1
+            }
+        }
+        for i in 0..<room.objects.count {
+            let arPt = toAR(room.objects[i].position)
+            if let col = CameraColorSampler.sampleColor(in: frame, atWorldPoint: arPt, patchRadiusPx: 8) {
+                room.objects[i].dominantColor = room.objects[i].dominantColor?.blended(with: col) ?? col
+                updatedCount += 1
+            }
+        }
+        if updatedCount > 0 {
+            learnedColorsCount += updatedCount
+            updateRoom(room)
+        }
+        return updatedCount
+    }
+    
     public func dismissDiscrepancy(_ discrepancy: RoomDiscrepancy) {
         switch discrepancy.kind {
         case .missingObject(let obj):
@@ -294,11 +348,13 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         let forwardLen = hypot(lookX, lookZ)
         let normARForward = (forwardLen > 0.001) ? SIMD2<Float>(lookX / forwardLen, lookZ / forwardLen) : SIMD2<Float>(0, 1)
         
-        // 1. Live center LiDAR/vertical distance for crosshair HUD
-        if frameCount % 2 == 0 {
+        // 1. Live center LiDAR/vertical distance + center RGB swatch for crosshair HUD
+        if frameCount % 3 == 0 {
             let frontDist = measureCenterWallOrDepthDistance(frame: frame, camPos: rawPos)
+            let centerCol = CameraColorSampler.sampleCenterColor(in: frame, radiusPx: 12)
             DispatchQueue.main.async {
                 self.targetDistanceMeters = frontDist
+                if let c = centerCol { self.liveCenterColor = c }
             }
         }
         
@@ -528,7 +584,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 let e = wall.endPoint2D
                 if let t = makeReferenceTarget(p1: SIMD2<Float>(Float(s.x), Float(s.y)),
                                                p2: SIMD2<Float>(Float(e.x), Float(e.y)),
-                                               name: "\(wall.displayName) #\(idx + 1)") {
+                                               name: "\(wall.displayName) #\(idx + 1)",
+                                               dominantColor: wall.dominantColor) {
                     targets.append(t)
                 }
             }
@@ -598,7 +655,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         }
     }
     
-    private func makeReferenceTarget(p1: SIMD2<Float>, p2: SIMD2<Float>, name: String) -> ReferenceWallTarget? {
+    private func makeReferenceTarget(p1: SIMD2<Float>, p2: SIMD2<Float>, name: String, dominantColor: SurfaceColor? = nil) -> ReferenceWallTarget? {
         let diff = p2 - p1
         let len = simd_length(diff)
         guard len >= 0.35 else { return nil }
@@ -611,7 +668,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             normal: normal,
             offset: simd_dot(p1, normal),
             angle: atan2(normal.y, normal.x),
-            displayName: name
+            displayName: name,
+            dominantColor: dominantColor
         )
     }
     
@@ -640,8 +698,9 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             
             let hitXZ = SIMD2<Float>(hp3.x, hp3.z)
             if simd_dot(norm2, camXZ - hitXZ) < 0 { norm2 = -norm2 }
+            let sampledCol = CameraColorSampler.sampleColor(in: frame, atWorldPoint: hp3, patchRadiusPx: 8)
             
-            addObservedRayPoint(ObservedWallPoint(pos: hitXZ, normal: norm2, weight: 1.0, timestamp: now))
+            addObservedRayPoint(ObservedWallPoint(pos: hitXZ, normal: norm2, weight: 1.0, timestamp: now, color: sampledCol))
         }
     }
     
@@ -731,10 +790,12 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                         }
                     }
                     if !nearVerticalWall {
+                        let col = CameraColorSampler.sampleColor(in: frame, atWorldPoint: wp, patchRadiusPx: 6)
                         let lm = ObservedLandmark(
                             pos: wp,
                             kind: .furniture(label: "Object", category: .generic, estWidth: 0.65, estDepth: 0.65, estHeight: hAboveFloor),
-                            timestamp: now
+                            timestamp: now,
+                            color: col
                         )
                         addDepthObstacle(lm)
                     }
@@ -973,9 +1034,9 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 
                 let rotCam = rot(camPosAR)
                 let rotClusters = topClusters.map { (center: rot($0.center), normal: rot($0.normal)) }
-                let rotWalls = obsWalls.map { (pos: rot($0.pos), normal: rot($0.normal), weight: $0.weight) }
+                let rotWalls = obsWalls.map { (pos: rot($0.pos), normal: rot($0.normal), weight: $0.weight, color: $0.color) }
                 let rotPortals = obsPortals.map { (pos: rot(SIMD2<Float>($0.pos.x, $0.pos.z)), kind: $0.kind) }
-                let rotFurn = obsFurnClusters.map { rot(SIMD2<Float>($0.pos.x, $0.pos.z)) }
+                let rotFurn = obsFurnClusters.map { (pos: rot(SIMD2<Float>($0.pos.x, $0.pos.z)), color: $0.color) }
                 let rotClearRays = clearRaySnapshot.map { (origin: rot($0.origin), dir: rot($0.dir), dist: $0.clearDist, furnH: $0.atFurnitureHeight) }
                 
                 var candidateTrans: [SIMD2<Float>] = []
@@ -1049,19 +1110,32 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                     var inlierWeight: Float = 0.0
                     var semanticHits = 0
                     
-                    // i. Wall geometry agreement
+                    // i. Wall geometry + dominant wall color agreement
                     for pt in rotWalls {
                         let wp = pt.pos + tr
                         var bestDistSq: Float = .greatestFiniteMagnitude
+                        var bestWallColor: SurfaceColor? = nil
                         for ref in targets {
                             guard abs(simd_dot(pt.normal, ref.normal)) > 0.78 else { continue }
                             let dSq = Self.pointToSegmentDistanceSquared(p: wp, a: ref.start, b: ref.end)
-                            bestDistSq = min(bestDistSq, dSq)
+                            if dSq < bestDistSq {
+                                bestDistSq = dSq
+                                bestWallColor = ref.dominantColor
+                            }
                         }
                         let kernel = 1.0 / (1.0 + bestDistSq / 0.0625)
                         score += pt.weight * kernel
                         if bestDistSq <= 0.1225 {
                             inlierWeight += pt.weight
+                            if let obsC = pt.color, let refC = bestWallColor {
+                                let dE = obsC.deltaE(to: refC)
+                                if dE < 18.0 {
+                                    score += 1.4
+                                    semanticHits += 1
+                                } else if dE > 42.0 {
+                                    score -= 1.4
+                                }
+                            }
                         }
                     }
                     
@@ -1087,20 +1161,29 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                         }
                     }
                     
-                    // iii. Furniture occupation agreement (Beds, Sofas, Tables, Desks) — huge corner disambiguator!
+                    // iii. Furniture occupation + dominant color agreement (Beds, Sofas, Tables, Desks)
                     for fp in rotFurn {
-                        let wp = fp + tr
-                        var matchedFurn = false
+                        let wp = fp.pos + tr
+                        var matchedFurn: RefFurniture? = nil
                         for rf in furniture {
                             let d = Self.distanceToOrientedBox2D(pt: wp, center: rf.pos, halfW: rf.halfW + 0.35, halfD: rf.halfD + 0.35, rotY: rf.rotY)
                             if d <= 0.01 {
-                                matchedFurn = true
+                                matchedFurn = rf
                                 break
                             }
                         }
-                        if matchedFurn {
+                        if let mf = matchedFurn {
                             score += 2.8
                             semanticHits += 1
+                            if let obsC = fp.color, let refC = mf.object.dominantColor {
+                                let dE = obsC.deltaE(to: refC)
+                                if dE < 22.0 {
+                                    score += 2.4
+                                    semanticHits += 1
+                                } else if dE > 45.0 {
+                                    score -= 1.4
+                                }
+                            }
                         } else if !furniture.isEmpty {
                             // Observed interior furniture where plan says open floor
                             score -= 0.75

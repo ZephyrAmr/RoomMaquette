@@ -28,6 +28,9 @@ public struct MaquetteWorkspaceView: View {
     public init(room: MaquetteRoom) {
         self.initialRoom = room
         self._room = State(initialValue: room)
+        let hasColors = room.walls.contains(where: { $0.dominantColor != nil }) ||
+                        room.objects.contains(where: { $0.dominantColor != nil })
+        self._maquetteStyle = State(initialValue: hasColors ? .realColors : .architecturalClay)
     }
     
     public var body: some View {

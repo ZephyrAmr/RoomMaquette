@@ -108,6 +108,7 @@ public struct FurnitureObject: Identifiable, Codable, Equatable, Hashable {
     public var dimensions: SIMD3<Float> // width (x), height (y), depth (z)
     public var transform: TransformMatrix
     public var confidence: Float
+    public var dominantColor: SurfaceColor? = nil
     
     public init(
         id: UUID = UUID(),
@@ -115,7 +116,8 @@ public struct FurnitureObject: Identifiable, Codable, Equatable, Hashable {
         customName: String? = nil,
         dimensions: SIMD3<Float>,
         transform: simd_float4x4,
-        confidence: Float = 1.0
+        confidence: Float = 1.0,
+        dominantColor: SurfaceColor? = nil
     ) {
         self.id = id
         self.category = category
@@ -123,6 +125,7 @@ public struct FurnitureObject: Identifiable, Codable, Equatable, Hashable {
         self.dimensions = dimensions
         self.transform = TransformMatrix(transform)
         self.confidence = confidence
+        self.dominantColor = dominantColor
     }
     
     public var displayName: String {

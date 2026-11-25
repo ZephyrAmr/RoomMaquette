@@ -1,5 +1,7 @@
 import SwiftUI
 import RoomPlan
+import ARKit
+import simd
 
 @available(iOS 16.0, *)
 public struct RoomCaptureViewContainer: UIViewRepresentable {
@@ -27,6 +29,7 @@ public struct RoomCaptureViewContainer: UIViewRepresentable {
     @objc(RoomCaptureViewContainerCoordinator)
     public class Coordinator: NSObject, RoomCaptureViewDelegate, RoomCaptureSessionDelegate {
         var parent: RoomCaptureViewContainer
+        private var updateCounter: Int = 0
         
         init(parent: RoomCaptureViewContainer) {
             self.parent = parent
@@ -44,7 +47,37 @@ public struct RoomCaptureViewContainer: UIViewRepresentable {
         // MARK: - RoomCaptureSessionDelegate Live Streaming
         
         public func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+            updateCounter += 1
+            var frameSamples: [(UUID, SurfaceColor)] = []
+            
+            if updateCounter % 3 == 0, #available(iOS 17.0, *) {
+                let arFrame = session.arSession.currentFrame
+                if let frame = arFrame {
+                    for wall in room.walls {
+                        let c = SIMD3<Float>(wall.transform.columns.3.x, wall.transform.columns.3.y, wall.transform.columns.3.z)
+                        if let col = CameraColorSampler.sampleColor(in: frame, atWorldPoint: c) {
+                            frameSamples.append((wall.identifier, col))
+                        }
+                    }
+                    for door in room.doors {
+                        let c = SIMD3<Float>(door.transform.columns.3.x, door.transform.columns.3.y, door.transform.columns.3.z)
+                        if let col = CameraColorSampler.sampleColor(in: frame, atWorldPoint: c) {
+                            frameSamples.append((door.identifier, col))
+                        }
+                    }
+                    for obj in room.objects {
+                        let c = SIMD3<Float>(obj.transform.columns.3.x, obj.transform.columns.3.y, obj.transform.columns.3.z)
+                        if let col = CameraColorSampler.sampleColor(in: frame, atWorldPoint: c) {
+                            frameSamples.append((obj.identifier, col))
+                        }
+                    }
+                }
+            }
+            
             DispatchQueue.main.async {
+                for (id, col) in frameSamples {
+                    self.parent.captureManager.recordColorSample(id: id, color: col)
+                }
                 self.parent.captureManager.latestCapturedRoom = room
                 self.parent.captureManager.updateLiveStats(
                     walls: room.walls.count,

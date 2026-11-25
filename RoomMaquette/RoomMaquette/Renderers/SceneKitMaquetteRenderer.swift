@@ -119,7 +119,16 @@ public class SceneKitMaquetteRenderer {
             let thickness = CGFloat(wall.thickness)
             
             let box = SCNBox(width: width, height: height, length: thickness, chamferRadius: 0.01)
-            box.firstMaterial = style.wallMaterial
+            if style == .realColors, let dom = wall.dominantColor {
+                let mat = SCNMaterial()
+                mat.isDoubleSided = true
+                mat.diffuse.contents = dom.uiColor
+                mat.roughness.contents = 0.85
+                mat.lightingModel = .physicallyBased
+                box.firstMaterial = mat
+            } else {
+                box.firstMaterial = style.wallMaterial
+            }
             
             let node = SCNNode(geometry: box)
             node.simdTransform = wall.transform.matrix
@@ -154,7 +163,15 @@ public class SceneKitMaquetteRenderer {
             let thickness: CGFloat = 0.04
             
             let doorGeo = SCNBox(width: width, height: height, length: thickness, chamferRadius: 0.005)
-            doorGeo.firstMaterial = style.doorMaterial
+            if style == .realColors, let dom = door.dominantColor {
+                let mat = SCNMaterial()
+                mat.diffuse.contents = dom.uiColor
+                mat.roughness.contents = 0.65
+                mat.lightingModel = .physicallyBased
+                doorGeo.firstMaterial = mat
+            } else {
+                doorGeo.firstMaterial = style.doorMaterial
+            }
             
             let doorNode = SCNNode(geometry: doorGeo)
             doorNode.simdTransform = door.transform.matrix
@@ -198,6 +215,12 @@ public class SceneKitMaquetteRenderer {
                 selMat.diffuse.contents = UIColor.systemBlue
                 selMat.emission.contents = UIColor.systemBlue.withAlphaComponent(0.4)
                 box.firstMaterial = selMat
+            } else if style == .realColors, let dom = obj.dominantColor {
+                let mat = SCNMaterial()
+                mat.diffuse.contents = dom.uiColor
+                mat.roughness.contents = 0.65
+                mat.lightingModel = .physicallyBased
+                box.firstMaterial = mat
             } else {
                 box.firstMaterial = style.furnitureMaterial(for: obj.category)
             }

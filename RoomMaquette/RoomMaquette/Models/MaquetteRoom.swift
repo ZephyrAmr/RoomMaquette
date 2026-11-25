@@ -51,7 +51,7 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
     
     // MARK: - Initializer from Apple RoomPlan CapturedRoom
     @available(iOS 16.0, *)
-    public init(from capturedRoom: CapturedRoom, name: String = "LiDAR Room Scan", usdzData: Data? = nil) {
+    public init(from capturedRoom: CapturedRoom, name: String = "LiDAR Room Scan", usdzData: Data? = nil, colorMap: [UUID: SurfaceColor] = [:]) {
         self.id = UUID()
         self.name = name
         self.createdAt = Date()
@@ -66,7 +66,8 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
                 id: wall.identifier,
                 dimensions: wall.dimensions,
                 transform: wall.transform,
-                confidence: wall.confidence == .high ? 1.0 : (wall.confidence == .medium ? 0.7 : 0.4)
+                confidence: wall.confidence == .high ? 1.0 : (wall.confidence == .medium ? 0.7 : 0.4),
+                dominantColor: colorMap[wall.identifier]
             )
         }
         
@@ -85,7 +86,8 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
                 dimensions: door.dimensions,
                 transform: door.transform,
                 isOpen: isOpen,
-                parentWallId: parentId
+                parentWallId: parentId,
+                dominantColor: colorMap[door.identifier]
             )
         }
         
@@ -124,7 +126,8 @@ public struct MaquetteRoom: Identifiable, Codable, Equatable, Hashable {
                 category: ObjectCategory.from(roomPlanCategory: obj.category),
                 dimensions: obj.dimensions,
                 transform: obj.transform,
-                confidence: obj.confidence == .high ? 1.0 : (obj.confidence == .medium ? 0.7 : 0.4)
+                confidence: obj.confidence == .high ? 1.0 : (obj.confidence == .medium ? 0.7 : 0.4),
+                dominantColor: colorMap[obj.identifier]
             )
         }
     }

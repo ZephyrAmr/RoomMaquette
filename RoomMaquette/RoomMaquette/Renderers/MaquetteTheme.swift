@@ -7,6 +7,7 @@ public enum MaquetteStyle: String, CaseIterable, Identifiable {
     case basswood = "Basswood Model"
     case technicalBlueprint = "Blueprint"
     case modernMaterial = "Color Coded"
+    case realColors = "Real Colors"
     
     public var id: String { rawValue }
     
@@ -16,6 +17,7 @@ public enum MaquetteStyle: String, CaseIterable, Identifiable {
         case .basswood: return "shippingbox"
         case .technicalBlueprint: return "square.grid.3x3"
         case .modernMaterial: return "paintpalette"
+        case .realColors: return "eyedropper.halffull"
         }
     }
     
@@ -44,7 +46,7 @@ public enum MaquetteStyle: String, CaseIterable, Identifiable {
             mat.transparency = 0.85
             mat.lightingModel = .phong
             
-        case .modernMaterial:
+        case .modernMaterial, .realColors:
             mat.diffuse.contents = UIColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1.0)
             mat.roughness.contents = 0.5
             mat.metalness.contents = 0.1
@@ -73,7 +75,7 @@ public enum MaquetteStyle: String, CaseIterable, Identifiable {
             mat.diffuse.contents = UIColor(red: 0.02, green: 0.08, blue: 0.20, alpha: 1.0)
             mat.lightingModel = .constant
             
-        case .modernMaterial:
+        case .modernMaterial, .realColors:
             mat.diffuse.contents = UIColor(red: 0.88, green: 0.82, blue: 0.74, alpha: 1.0) // Soft oak parquet tone
             mat.roughness.contents = 0.6
             mat.lightingModel = .physicallyBased
@@ -103,7 +105,7 @@ public enum MaquetteStyle: String, CaseIterable, Identifiable {
             mat.diffuse.contents = UIColor(red: 0.78, green: 0.65, blue: 0.50, alpha: 1.0)
         case .technicalBlueprint:
             mat.diffuse.contents = UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 0.8)
-        case .modernMaterial:
+        case .modernMaterial, .realColors:
             mat.diffuse.contents = UIColor(red: 0.75, green: 0.58, blue: 0.44, alpha: 1.0)
         }
         return mat
@@ -128,7 +130,7 @@ public enum MaquetteStyle: String, CaseIterable, Identifiable {
             mat.emission.contents = UIColor(red: 0.0, green: 0.3, blue: 0.6, alpha: 0.2)
             mat.transparency = 0.7
             
-        case .modernMaterial:
+        case .modernMaterial, .realColors:
             mat.diffuse.contents = UIColor(category.accentColor)
             mat.roughness.contents = 0.5
         }
@@ -144,7 +146,7 @@ public enum MaquetteStyle: String, CaseIterable, Identifiable {
             return UIColor(red: 0.95, green: 0.93, blue: 0.90, alpha: 1.0)
         case .technicalBlueprint:
             return UIColor(red: 0.02, green: 0.05, blue: 0.12, alpha: 1.0)
-        case .modernMaterial:
+        case .modernMaterial, .realColors:
             return UIColor(red: 0.94, green: 0.95, blue: 0.97, alpha: 1.0)
         }
     }

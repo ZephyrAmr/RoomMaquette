@@ -11,6 +11,7 @@ public struct RoomLocateMeView: View {
     @StateObject private var tracker = ARIndoorPositionTracker()
     @State private var minimapExpanded: Bool = false
     @State private var locateDisplayMode: FloorPlanDisplayMode
+    @State private var savedColorBannerText: String? = nil
     
     public init(room: Binding<MaquetteRoom>, onSaveRoom: (() -> Void)? = nil) {
         self._room = room
@@ -178,19 +179,28 @@ public struct RoomLocateMeView: View {
                     .frame(width: 4, height: 4)
             }
             
-            if let dist = tracker.targetDistanceMeters {
-                HStack(spacing: 4) {
-                    Image(systemName: "ruler")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(String(format: "%.2f m", dist))
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+            HStack(spacing: 8) {
+                if let dist = tracker.targetDistanceMeters {
+                    HStack(spacing: 4) {
+                        Image(systemName: "ruler")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(String(format: "%.2f m", dist))
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .foregroundColor(.white)
+                    .shadow(radius: 4)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(.ultraThinMaterial, in: Capsule())
-                .foregroundColor(.white)
-                .shadow(radius: 4)
-                .transition(.opacity)
+                
+                if let col = tracker.liveCenterColor {
+                    Circle()
+                        .fill(Color(col.uiColor))
+                        .frame(width: 18, height: 18)
+                        .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
+                        .shadow(radius: 3)
+                }
             }
             
             Spacer()
@@ -238,6 +248,32 @@ public struct RoomLocateMeView: View {
             
             Spacer()
             
+            if tracker.isAutoLocalized {
+                Button {
+                    let count = tracker.captureVisibleColors(into: &room)
+                    if count > 0 {
+                        room.modifiedAt = Date()
+                        onSaveRoom?()
+                        savedColorBannerText = "Captured \(count) surface color(s)"
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            savedColorBannerText = nil
+                        }
+                    } else {
+                        savedColorBannerText = "Point at walls/furniture & tap again"
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                            savedColorBannerText = nil
+                        }
+                    }
+                } label: {
+                    Image(systemName: "eyedropper.halffull")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.purple)
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+            }
+            
             Button {
                 tracker.relocalize()
             } label: {
@@ -250,6 +286,16 @@ public struct RoomLocateMeView: View {
         }
         .padding(.horizontal)
         .padding(.top, 8)
+        .overlay(alignment: .bottom) {
+            if let toast = savedColorBannerText {
+                Text(toast)
+                    .font(.caption.bold())
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThickMaterial, in: Capsule())
+                    .offset(y: 42)
+            }
+        }
     }
     
     // MARK: - Bottom Minimap Drawer

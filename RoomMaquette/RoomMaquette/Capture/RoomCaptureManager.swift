@@ -18,6 +18,7 @@ public class RoomCaptureManager: ObservableObject {
     public var roomCaptureView: RoomCaptureView?
     public var latestCapturedRoom: CapturedRoom? = nil
     public var completedRoomRaw: CapturedRoom? = nil
+    public var capturedColors: [UUID: SurfaceColor] = [:]
     
     private var pendingCompletion: ((MaquetteRoom?) -> Void)?
     private var timer: Timer?
@@ -47,6 +48,7 @@ public class RoomCaptureManager: ObservableObject {
         completedRoom = nil
         latestCapturedRoom = nil
         completedRoomRaw = nil
+        capturedColors.removeAll()
         pendingCompletion = nil
         
         let config = RoomCaptureSession.Configuration()
@@ -140,8 +142,17 @@ public class RoomCaptureManager: ObservableObject {
         return MaquetteRoom(
             from: captured,
             name: scanName,
-            usdzData: usdzData
+            usdzData: usdzData,
+            colorMap: capturedColors
         )
+    }
+    
+    public func recordColorSample(id: UUID, color: SurfaceColor) {
+        if let existing = capturedColors[id] {
+            capturedColors[id] = existing.blended(with: color)
+        } else {
+            capturedColors[id] = color
+        }
     }
     
     public func cancelCapture() {

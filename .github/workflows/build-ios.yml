@@ -2,7 +2,7 @@ name: Build iOS RoomMaquette
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'test/**' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -137,6 +137,23 @@ jobs:
             ### 📦 Direct Downloads:
             - **[RoomMaquette.ipa](https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette.ipa)** (Unsigned iOS app)
             - **[RoomMaquette-Simulator.app.zip](https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette-Simulator.app.zip)** (Xcode Simulator)
+          files: |
+            RoomMaquette.ipa
+            RoomMaquette-unsigned.ipa
+            RoomMaquette-Simulator.app.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Test Branch Release
+        if: startsWith(github.ref, 'refs/heads/test/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: test-color
+          name: "RoomMaquette Test Branch (Dominant Colors)"
+          prerelease: true
+          body: |
+            ## 🧪 Test Branch Build (`test/dominant-color-textures`)
+            - **SideStore Direct Install**: [Install Test IPA in SideStore](sidestore://install?url=https://github.com/ZephyrAmr/RoomMaquette/releases/download/test-color/RoomMaquette.ipa)
           files: |
             RoomMaquette.ipa
             RoomMaquette-unsigned.ipa

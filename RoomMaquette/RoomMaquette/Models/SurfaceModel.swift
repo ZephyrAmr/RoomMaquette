@@ -1,7 +1,75 @@
 import Foundation
 import CoreGraphics
+import UIKit
 import simd
 import RoomPlan
+
+// MARK: - Perceptual Surface Color (sRGB + CIELAB)
+
+public struct SurfaceColor: Codable, Equatable, Hashable {
+    public var r: Float
+    public var g: Float
+    public var b: Float
+    public var l: Float
+    public var a: Float
+    public var bLab: Float
+    public var sampleCount: Int
+    
+    public init(r: Float, g: Float, b: Float, sampleCount: Int = 1) {
+        self.r = max(0, min(1, r))
+        self.g = max(0, min(1, g))
+        self.b = max(0, min(1, b))
+        self.sampleCount = max(1, sampleCount)
+        let lab = Self.rgbToLab(r: self.r, g: self.g, b: self.b)
+        self.l = lab.l
+        self.a = lab.a
+        self.bLab = lab.b
+    }
+    
+    public var uiColor: UIColor {
+        UIColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1.0)
+    }
+    
+    /// Lighting-tolerant perceptual color distance (prioritizes chroma a/b over lightness L)
+    public func deltaE(to other: SurfaceColor) -> Float {
+        let dL = (l - other.l) * 0.55
+        let dA = a - other.a
+        let dB = bLab - other.bLab
+        return sqrt(dL * dL + dA * dA + dB * dB)
+    }
+    
+    public func blended(with sample: SurfaceColor) -> SurfaceColor {
+        let w1 = Float(sampleCount)
+        let w2 = Float(sample.sampleCount)
+        let total = w1 + w2
+        return SurfaceColor(
+            r: (r * w1 + sample.r * w2) / total,
+            g: (g * w1 + sample.g * w2) / total,
+            b: (b * w1 + sample.b * w2) / total,
+            sampleCount: min(sampleCount + sample.sampleCount, 120)
+        )
+    }
+    
+    private static func rgbToLab(r: Float, g: Float, b: Float) -> (l: Float, a: Float, b: Float) {
+        func lin(_ c: Float) -> Float {
+            c > 0.04045 ? pow((c + 0.055) / 1.055, 2.4) : (c / 12.92)
+        }
+        let rl = lin(r), gl = lin(g), bl = lin(b)
+        // sRGB D65 -> XYZ
+        let x = (rl * 0.4124564 + gl * 0.3575761 + bl * 0.1804375) / 0.95047
+        let y = (rl * 0.2126729 + gl * 0.7151522 + bl * 0.0721750) / 1.00000
+        let z = (rl * 0.0193339 + gl * 0.1191920 + bl * 0.9503041) / 1.08883
+        
+        func f(_ t: Float) -> Float {
+            t > 0.008856 ? pow(t, 1.0 / 3.0) : (7.787 * t + 16.0 / 116.0)
+        }
+        let fx = f(x), fy = f(y), fz = f(z)
+        let L = 116.0 * fy - 16.0
+        let A = 500.0 * (fx - fy)
+        let B = 200.0 * (fy - fz)
+        return (L, A, B)
+    }
+}
 
 // MARK: - Transform Matrix Codable Wrapper
 
@@ -99,12 +167,14 @@ public struct WallSurface: Identifiable, Codable, Equatable, Hashable {
     public var dimensions: SIMD3<Float> // width (x), height (y), thickness (z)
     public var transform: TransformMatrix
     public var confidence: Float
+    public var dominantColor: SurfaceColor? = nil
     
-    public init(id: UUID = UUID(), dimensions: SIMD3<Float>, transform: simd_float4x4, confidence: Float = 1.0) {
+    public init(id: UUID = UUID(), dimensions: SIMD3<Float>, transform: simd_float4x4, confidence: Float = 1.0, dominantColor: SurfaceColor? = nil) {
         self.id = id
         self.dimensions = dimensions
         self.transform = TransformMatrix(transform)
         self.confidence = confidence
+        self.dominantColor = dominantColor
     }
     
     public var length: Float { dimensions.x }
@@ -155,13 +225,15 @@ public struct DoorSurface: Identifiable, Codable, Equatable, Hashable {
     public var transform: TransformMatrix
     public var isOpen: Bool
     public var parentWallId: UUID?
+    public var dominantColor: SurfaceColor? = nil
     
-    public init(id: UUID = UUID(), dimensions: SIMD3<Float>, transform: simd_float4x4, isOpen: Bool = true, parentWallId: UUID? = nil) {
+    public init(id: UUID = UUID(), dimensions: SIMD3<Float>, transform: simd_float4x4, isOpen: Bool = true, parentWallId: UUID? = nil, dominantColor: SurfaceColor? = nil) {
         self.id = id
         self.dimensions = dimensions
         self.transform = TransformMatrix(transform)
         self.isOpen = isOpen
         self.parentWallId = parentWallId
+        self.dominantColor = dominantColor
     }
     
     public var width: Float { dimensions.x }
