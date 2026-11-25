@@ -83,7 +83,7 @@ public struct HomeDashboardView: View {
                         Button {
                             showingScanImporter = true
                         } label: {
-                            Label("Import Scan or Floor Plan (USDZ, Image, PDF, SVG)", systemImage: "square.and.arrow.down")
+                            Label("Import Scan or Plan (USDZ, IFC, Image, PDF, SVG)", systemImage: "square.and.arrow.down")
                         }
                         
                         Divider()
@@ -268,7 +268,7 @@ public struct HomeDashboardView: View {
                         .font(.subheadline)
                         .fontWeight(.bold)
                         .foregroundColor(.primary)
-                    Text("Import USDZ, JSON backup, OBJ scans, or PNG/PDF/SVG plans")
+                    Text("Import USDZ, IFC, JSON, OBJ scans, or PNG/PDF/SVG plans")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
