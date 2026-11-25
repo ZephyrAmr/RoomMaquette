@@ -142,6 +142,24 @@ public struct FloorPlanTabView: View {
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
+                    
+                    if room.importedPlan?.isHeuristicScale == true {
+                        Button {
+                            onAlignPlan?()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "ruler.fill")
+                                    .foregroundColor(.orange)
+                                Text("Estimated plan scale — tap to calibrate via 2-Point Scale")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.primary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.ultraThickMaterial, in: Capsule())
+                        }
+                        .padding(.horizontal)
+                    }
                 }
                 
                 Spacer()

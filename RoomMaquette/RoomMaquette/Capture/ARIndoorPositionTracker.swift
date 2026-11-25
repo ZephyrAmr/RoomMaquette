@@ -14,6 +14,7 @@ public struct ReferenceWallTarget: Identifiable {
     public var normal: SIMD2<Float>
     public var offset: Float
     public var angle: Float
+    public var thickness: Float
     public var displayName: String
     
     public var length: Float {
@@ -51,6 +52,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     @Published public var observedWallCount: Int = 0
     @Published public var observedLandmarkCount: Int = 0
     @Published public var activeDiscrepancy: RoomDiscrepancy? = nil
+    @Published public var userHintPosition: SIMD2<Float>? = nil
+    @Published public var lockedPlanScale: Float = 1.0
     
     public var session: ARSession
     public var room: MaquetteRoom?
@@ -110,15 +113,17 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         var floorY: Float?
     }
     
-    // Rigid SE(2) Transform: AR space -> Reference space (Room or Imported Plan)
+    // Rigid/Similarity SE(2) Transform: AR space -> Reference space (Room or Imported Plan)
     private var alignmentAngle: Float = 0.0
     private var alignmentOffset: SIMD3<Float> = .zero
+    private var effectiveScale: Float = 1.0
     private let transformLock = NSLock()
     
     // Reference Geometry built from MaquetteRoom
     private var referenceTargets: [ReferenceWallTarget] = []
     private var referencePortals: [RefPortal] = []
     private var referenceFurniture: [RefFurniture] = []
+    private var referenceCorners: [SIMD2<Float>] = []
     private var refMinBounds = SIMD2<Float>(-5, -5)
     private var refMaxBounds = SIMD2<Float>(5, 5)
     private var roomFloorY: Float = 0.0
@@ -138,8 +143,9 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     private let solverQueue = DispatchQueue(label: "com.roommaquette.localization", qos: .userInitiated)
     private var isSolving: Bool = false
     private var lastSolveTime: TimeInterval = 0
+    private var lastRefineTime: TimeInterval = 0
     private var consistentCandidateCount: Int = 0
-    private var lastBestCandidate: (angle: Float, tx: Float, tz: Float)? = nil
+    private var lastBestCandidate: (angle: Float, tx: Float, tz: Float, scale: Float)? = nil
     
     // Discrepancy Verification State
     private var lastDiscrepancyCheckTime: TimeInterval = 0
@@ -193,6 +199,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         transformLock.lock()
         self.alignmentAngle = 0.0
         self.alignmentOffset = .zero
+        self.effectiveScale = 1.0
         transformLock.unlock()
         
         // IMPORTANT: Keep position nil until localization is genuinely confirmed!
@@ -201,6 +208,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.isCalibrated = false
         self.isAutoLocalized = false
         self.localizationConfidence = 0.0
+        self.lockedPlanScale = 1.0
         self.consistentCandidateCount = 0
         self.lastBestCandidate = nil
         self.localizedTargetName = nil
@@ -208,6 +216,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.observedWallCount = 0
         self.observedLandmarkCount = 0
         self.activeDiscrepancy = nil
+        self.userHintPosition = nil
+        self.lastRefineTime = 0
         
         self.floorCalibrated = false
         self.estimatedFloorY = -1.30
@@ -267,9 +277,14 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.consistentCandidateCount = 0
         self.lastBestCandidate = nil
         self.localizationConfidence = 0.0
+        self.lockedPlanScale = 1.0
         self.observedWallCount = 0
         self.observedLandmarkCount = 0
         self.activeDiscrepancy = nil
+        self.lastRefineTime = 0
+        transformLock.lock()
+        self.effectiveScale = 1.0
+        transformLock.unlock()
         self.observedRayPoints.removeAll()
         self.observedDepthObstacles.removeAll()
         self.clearRays.removeAll()
@@ -277,6 +292,25 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.newObjectStrikes.removeAll()
         self.trackingStatusText = "Relocalizing... Pan across walls, furniture & windows"
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+    
+    public func setRegionHint(_ planPoint: SIMD2<Float>) {
+        self.userHintPosition = planPoint
+        self.consistentCandidateCount = 0
+        self.lastBestCandidate = nil
+        if self.isAutoLocalized {
+            self.isAutoLocalized = false
+            self.isCalibrated = false
+            self.currentPosition = nil
+            self.currentHeading = nil
+        }
+        self.trackingStatusText = "Hint pinned — look at nearby walls & doors to lock"
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    
+    public func clearRegionHint() {
+        self.userHintPosition = nil
+        self.consistentCandidateCount = 0
     }
     
     // MARK: - ARSessionDelegate
@@ -304,31 +338,32 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         
         // 2. Sample vertical walls + dense LiDAR depth (for furniture obstacles & clear-air rays)
         if frameCount % 4 == 0 {
-            if !isAutoLocalized {
-                sampleHorizontalVerticalWallFan(frame: frame, camPos: rawPos)
-            }
+            sampleHorizontalVerticalWallFan(frame: frame, camPos: rawPos)
             sampleSceneDepthFeatures(frame: frame, camPos: rawPos)
         }
         
-        // 3. Solve rigid SE(2) pose until locked with high certainty + uniqueness
+        // 3. Solve similarity/rigid SE(2) pose until locked with high certainty + uniqueness
         let now = Date().timeIntervalSince1970
         if !isAutoLocalized && !isSolving && !referenceTargets.isEmpty && (now - lastSolveTime) > 0.38 {
             lastSolveTime = now
             triggerLocalizationSolve(camPosAR: SIMD2<Float>(rawPos.x, rawPos.z), arForward: normARForward)
         }
         
-        // 4. Only publish position & heading ONCE genuinely localized (never show misleading guesses!)
+        // 4. Publish position & heading ONCE localized + periodic continuous drift refinement
         if isAutoLocalized {
             transformLock.lock()
             let yaw = alignmentAngle
             let offset = alignmentOffset
+            let curScale = effectiveScale
             transformLock.unlock()
             
             let cosA = cos(yaw)
             let sinA = sin(yaw)
             
-            let rotX = rawPos.x * cosA - rawPos.z * sinA
-            let rotZ = rawPos.x * sinA + rawPos.z * cosA
+            let sx = rawPos.x * curScale
+            let sz = rawPos.z * curScale
+            let rotX = sx * cosA - sz * sinA
+            let rotZ = sx * sinA + sz * cosA
             let transformedPos = SIMD3<Float>(rotX + offset.x, rawPos.y, rotZ + offset.z)
             
             let roomLookX = normARForward.x * cosA - normARForward.y * sinA
@@ -340,10 +375,16 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 self.currentHeading = screenHeading
             }
             
+            // Continuous local refinement against live vertical wall planes to prevent VIO drift
+            if !isSolving && !referenceTargets.isEmpty && (now - lastRefineTime) > 0.90 {
+                lastRefineTime = now
+                triggerContinuousPoseRefinement(camPosAR: SIMD2<Float>(rawPos.x, rawPos.z))
+            }
+            
             // 5. Discrepancy Detection (Missing items & New items in the room)
             if activeDiscrepancy == nil && (!isLocatingOnImportedPlan || !referenceFurniture.isEmpty) && (now - lastDiscrepancyCheckTime) > 0.40 {
                 lastDiscrepancyCheckTime = now
-                evaluateLiveDiscrepancies(frame: frame, camPosAR: rawPos, yaw: yaw, offset: offset)
+                evaluateLiveDiscrepancies(frame: frame, camPosAR: rawPos, yaw: yaw, offset: offset, curScale: curScale)
             }
         }
     }
@@ -513,27 +554,75 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     
     private func rebuildReferenceGeometry(for room: MaquetteRoom, usePlanSpace: Bool) {
         var targets: [ReferenceWallTarget] = []
+        let isPlanCreated = room.notes.hasPrefix("Created from imported plan:")
         
-        if usePlanSpace, let plan = room.importedPlan, !plan.vectorLines.isEmpty {
-            for (idx, line) in plan.vectorLines.enumerated() {
-                if let t = makeReferenceTarget(p1: SIMD2<Float>(line.startX, line.startZ),
-                                               p2: SIMD2<Float>(line.endX, line.endZ),
-                                               name: "Plan Wall #\(idx + 1)") {
-                    targets.append(t)
-                }
-            }
-        } else {
+        // Prefer room.walls whenever present so 2D editor edits, custom walls & thicknesses apply immediately!
+        if !room.walls.isEmpty {
+            let align = (usePlanSpace && !isPlanCreated) ? room.importedPlan?.alignment : nil
             for (idx, wall) in room.walls.enumerated() {
                 let s = wall.startPoint2D
                 let e = wall.endPoint2D
-                if let t = makeReferenceTarget(p1: SIMD2<Float>(Float(s.x), Float(s.y)),
-                                               p2: SIMD2<Float>(Float(e.x), Float(e.y)),
-                                               name: "\(wall.displayName) #\(idx + 1)") {
+                var p1 = SIMD2<Float>(Float(s.x), Float(s.y))
+                var p2 = SIMD2<Float>(Float(e.x), Float(e.y))
+                var thick = wall.thickness
+                if let al = align {
+                    let m1 = al.mapScanToPlan(point: SIMD3<Float>(p1.x, 0, p1.y))
+                    let m2 = al.mapScanToPlan(point: SIMD3<Float>(p2.x, 0, p2.y))
+                    p1 = SIMD2<Float>(m1.x, m1.z)
+                    p2 = SIMD2<Float>(m2.x, m2.z)
+                    thick *= al.scale
+                }
+                if let t = makeReferenceTarget(p1: p1, p2: p2, thickness: thick, name: "\(wall.displayName) #\(idx + 1)") {
+                    targets.append(t)
+                }
+            }
+        } else if usePlanSpace, let plan = room.importedPlan, !plan.vectorLines.isEmpty {
+            for (idx, line) in plan.vectorLines.enumerated() {
+                if let t = makeReferenceTarget(p1: SIMD2<Float>(line.startX, line.startZ),
+                                               p2: SIMD2<Float>(line.endX, line.endZ),
+                                               thickness: 0.15,
+                                               name: "Plan Wall #\(idx + 1)") {
                     targets.append(t)
                 }
             }
         }
         self.referenceTargets = targets
+        
+        // Precompute structural L-corners & T-junction vertices
+        var rawCorners: [SIMD2<Float>] = []
+        for i in 0..<targets.count {
+            let wA = targets[i]
+            for j in (i + 1)..<targets.count {
+                let wB = targets[j]
+                guard abs(wA.tangent.x * wB.tangent.y - wA.tangent.y * wB.tangent.x) > 0.35 else { continue }
+                let endpointsA = [wA.start, wA.end]
+                let endpointsB = [wB.start, wB.end]
+                var mergedPt: SIMD2<Float>? = nil
+                for epA in endpointsA {
+                    for epB in endpointsB where simd_distance(epA, epB) <= 0.45 {
+                        mergedPt = (epA + epB) * 0.5
+                        break
+                    }
+                    if mergedPt != nil { break }
+                }
+                if mergedPt == nil {
+                    for epA in endpointsA where Self.pointToSegmentDistanceSquared(p: epA, a: wB.start, b: wB.end) <= (0.40 * 0.40) {
+                        mergedPt = epA
+                        break
+                    }
+                }
+                if mergedPt == nil {
+                    for epB in endpointsB where Self.pointToSegmentDistanceSquared(p: epB, a: wA.start, b: wA.end) <= (0.40 * 0.40) {
+                        mergedPt = epB
+                        break
+                    }
+                }
+                if let corner = mergedPt, !rawCorners.contains(where: { simd_distance($0, corner) < 0.35 }) {
+                    rawCorners.append(corner)
+                }
+            }
+        }
+        self.referenceCorners = rawCorners
         
         // Floor Y in room coordinates
         if let firstWall = room.walls.first {
@@ -544,11 +633,11 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             self.roomFloorY = room.boundingBox.min.y
         }
         
-        // Portals (Windows, Doors, Openings)
+        // Portals (Windows, Doors, Openings) — map only if walls aren't already in active plan space
         var portals: [RefPortal] = []
-        let align = room.importedPlan?.alignment
+        let alignPortals = (usePlanSpace && !isPlanCreated) ? room.importedPlan?.alignment : nil
         func mapToActive(_ pos: SIMD3<Float>) -> SIMD2<Float> {
-            if usePlanSpace, let al = align {
+            if let al = alignPortals {
                 let p = al.mapScanToPlan(point: pos)
                 return SIMD2<Float>(p.x, p.z)
             }
@@ -562,6 +651,18 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         }
         for o in room.openings {
             portals.append(RefPortal(id: o.id, pos: mapToActive(o.position), width: o.width, type: .opening))
+        }
+        // Fallback: if room arrays are empty, check plan.detectedDoors/Windows/Openings
+        if portals.isEmpty, usePlanSpace, let plan = room.importedPlan {
+            for w in plan.detectedWindows ?? [] {
+                portals.append(RefPortal(id: w.id, pos: SIMD2<Float>(w.position.x, w.position.z), width: w.width, type: .window))
+            }
+            for d in plan.detectedDoors ?? [] {
+                portals.append(RefPortal(id: d.id, pos: SIMD2<Float>(d.position.x, d.position.z), width: d.width, type: .door))
+            }
+            for o in plan.detectedOpenings ?? [] {
+                portals.append(RefPortal(id: o.id, pos: SIMD2<Float>(o.position.x, o.position.z), width: o.width, type: .opening))
+            }
         }
         self.referencePortals = portals
         
@@ -598,10 +699,10 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         }
     }
     
-    private func makeReferenceTarget(p1: SIMD2<Float>, p2: SIMD2<Float>, name: String) -> ReferenceWallTarget? {
+    private func makeReferenceTarget(p1: SIMD2<Float>, p2: SIMD2<Float>, thickness: Float = 0.15, name: String) -> ReferenceWallTarget? {
         let diff = p2 - p1
         let len = simd_length(diff)
-        guard len >= 0.35 else { return nil }
+        guard len >= 0.25 else { return nil }
         let tangent = diff / len
         let normal = SIMD2<Float>(-tangent.y, tangent.x)
         return ReferenceWallTarget(
@@ -611,6 +712,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             normal: normal,
             offset: simd_dot(p1, normal),
             angle: atan2(normal.y, normal.x),
+            thickness: thickness,
             displayName: name
         )
     }
@@ -795,6 +897,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         let targets = referenceTargets
         let portals = referencePortals
         let furniture = referenceFurniture
+        let corners = referenceCorners
+        let hintPos = userHintPosition
         let minB = refMinBounds
         let maxB = refMaxBounds
         let curFloorY = estimatedFloorY
@@ -955,222 +1059,320 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 var yaw: Float
                 var tx: Float
                 var tz: Float
+                var scale: Float
                 var score: Float
                 var wallInlierRatio: Float
                 var semanticMatches: Int
                 var facingName: String?
             }
-            var allHypotheses: [PoseHyp] = []
+            
+            // Compute actual observed AR corner intersections where two dominant walls meet
+            var obsCornersAR: [SIMD2<Float>] = []
+            if topClusters.count >= 2 {
+                for i in 0..<topClusters.count {
+                    let cA = topClusters[i]
+                    for j in (i + 1)..<topClusters.count {
+                        let cB = topClusters[j]
+                        let det = cA.normal.x * cB.normal.y - cA.normal.y * cB.normal.x
+                        guard abs(det) > 0.35 else { continue }
+                        let ix = (cA.offset * cB.normal.y - cB.offset * cA.normal.y) / det
+                        let iz = (cA.normal.x * cB.offset - cB.normal.x * cA.offset) / det
+                        let cornerPt = SIMD2<Float>(ix, iz)
+                        if simd_distance(cornerPt, cA.center) < 2.8 && simd_distance(cornerPt, cB.center) < 2.8 {
+                            obsCornersAR.append(cornerPt)
+                        }
+                    }
+                }
+            }
+            
             let totalWallWeight = max(obsWalls.reduce(Float(0)) { $0 + $1.weight }, 1.0)
             
-            // 4. Generate & Score Candidate Transforms
-            for yaw in candidateYaws {
+            func evaluateHypothesis(yaw: Float, tr: SIMD2<Float>, s: Float) -> PoseHyp {
                 let cosY = cos(yaw)
                 let sinY = sin(yaw)
-                func rot(_ v: SIMD2<Float>) -> SIMD2<Float> {
+                func mapPt(_ v: SIMD2<Float>) -> SIMD2<Float> {
+                    let vs = v * s
+                    return SIMD2<Float>(vs.x * cosY - vs.y * sinY, vs.x * sinY + vs.y * cosY) + tr
+                }
+                func rotDir(_ v: SIMD2<Float>) -> SIMD2<Float> {
                     SIMD2<Float>(v.x * cosY - v.y * sinY, v.x * sinY + v.y * cosY)
                 }
                 
-                let rotCam = rot(camPosAR)
-                let rotClusters = topClusters.map { (center: rot($0.center), normal: rot($0.normal)) }
-                let rotWalls = obsWalls.map { (pos: rot($0.pos), normal: rot($0.normal), weight: $0.weight) }
-                let rotPortals = obsPortals.map { (pos: rot(SIMD2<Float>($0.pos.x, $0.pos.z)), kind: $0.kind) }
-                let rotFurn = obsFurnClusters.map { rot(SIMD2<Float>($0.pos.x, $0.pos.z)) }
-                let rotClearRays = clearRaySnapshot.map { (origin: rot($0.origin), dir: rot($0.dir), dist: $0.clearDist, furnH: $0.atFurnitureHeight) }
+                let camW = mapPt(camPosAR)
+                var score: Float = -abs(s - 1.0) * 3.0 // prefer 1.0 when scale is ambiguous
+                var inlierWeight: Float = 0.0
+                var semanticHits = 0
                 
-                var candidateTrans: [SIMD2<Float>] = []
-                
-                // A. 2-Wall Corner Intersection (non-parallel pairs)
-                if rotClusters.count >= 2 {
-                    for i in 0..<rotClusters.count {
-                        let cA = rotClusters[i]
-                        for j in (i + 1)..<rotClusters.count {
-                            let cB = rotClusters[j]
-                            guard abs(cA.normal.x * cB.normal.y - cA.normal.y * cB.normal.x) > 0.35 else { continue }
-                            let matchA = targets.filter { abs(simd_dot(cA.normal, $0.normal)) > 0.85 }
-                            let matchB = targets.filter { abs(simd_dot(cB.normal, $0.normal)) > 0.85 }
-                            
-                            for rA in matchA {
-                                let sA: Float = simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0
-                                let nA = rA.normal * sA
-                                let rhsA = rA.offset * sA - simd_dot(cA.center, nA)
-                                for rB in matchB where rB.id != rA.id {
-                                    let sB: Float = simd_dot(cB.normal, rB.normal) >= 0 ? 1.0 : -1.0
-                                    let nB = rB.normal * sB
-                                    let rhsB = rB.offset * sB - simd_dot(cB.center, nB)
-                                    let det = nA.x * nB.y - nA.y * nB.x
-                                    guard abs(det) > 0.35 else { continue }
-                                    let tx = (rhsA * nB.y - rhsB * nA.y) / det
-                                    let tz = (nA.x * rhsB - nB.x * rhsA) / det
-                                    let camW = SIMD2<Float>(rotCam.x + tx, rotCam.y + tz)
-                                    // STRICT inside-bounds check (never put user outside the room!)
-                                    if camW.x >= minB.x - 0.30 && camW.x <= maxB.x + 0.30 &&
-                                       camW.y >= minB.y - 0.30 && camW.y <= maxB.y + 0.30 {
-                                        candidateTrans.append(SIMD2<Float>(tx, tz))
-                                    }
-                                }
-                            }
-                        }
+                // i. Wall geometry agreement with interior wall half-thickness compensation
+                for pt in obsWalls {
+                    let wp = mapPt(pt.pos)
+                    let wn = rotDir(pt.normal)
+                    var bestDistSq: Float = .greatestFiniteMagnitude
+                    for ref in targets {
+                        guard abs(simd_dot(wn, ref.normal)) > 0.78 else { continue }
+                        let sideSign: Float = simd_dot(camW - ref.center, ref.normal) >= 0 ? 1.0 : -1.0
+                        let faceShift = ref.normal * (sideSign * min(ref.thickness * 0.5, 0.14))
+                        let dSq = Self.pointToSegmentDistanceSquared(p: wp, a: ref.start + faceShift, b: ref.end + faceShift)
+                        bestDistSq = min(bestDistSq, dSq)
+                    }
+                    let kernel = 1.0 / (1.0 + bestDistSq / 0.0625)
+                    score += pt.weight * kernel
+                    if bestDistSq <= 0.1225 {
+                        inlierWeight += pt.weight
                     }
                 }
                 
-                // B. 1-Wall + Landmark / Sliding fallback (helps when looking at 1 wall + window/furniture)
-                if candidateTrans.isEmpty {
-                    let cA = rotClusters[0]
-                    for rA in targets where abs(simd_dot(cA.normal, rA.normal)) > 0.88 {
-                        let sA: Float = simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0
-                        let nA = rA.normal * sA
-                        let perpShift = rA.offset * sA - simd_dot(cA.center, nA)
-                        let steps = max(Int(rA.length / 0.5), 2)
-                        for k in 0...steps {
-                            let targetPt = rA.start + rA.tangent * (rA.length * (Float(k) / Float(steps)))
-                            let alongShift = simd_dot(targetPt - cA.center, rA.tangent)
-                            let tr = nA * perpShift + rA.tangent * alongShift
-                            let camW = rotCam + tr
-                            if camW.x >= minB.x - 0.30 && camW.x <= maxB.x + 0.30 &&
-                               camW.y >= minB.y - 0.30 && camW.y <= maxB.y + 0.30 {
-                                candidateTrans.append(tr)
-                            }
-                        }
+                // i-b. Corner junction topology agreement
+                for oc in obsCornersAR {
+                    let wc = mapPt(oc)
+                    if corners.contains(where: { simd_distance($0, wc) <= 0.50 }) {
+                        score += 1.6
                     }
                 }
                 
-                // Deduplicate translations within 0.20m
-                var uniqueTrans: [SIMD2<Float>] = []
-                for t in candidateTrans {
-                    if !uniqueTrans.contains(where: { simd_distance($0, t) < 0.20 }) {
-                        uniqueTrans.append(t)
+                // ii. Portal agreement (Windows, Doors, Openings)
+                for op in obsPortals {
+                    let wp = mapPt(SIMD2<Float>(op.pos.x, op.pos.z))
+                    var matched = false
+                    for refP in portals {
+                        let typeOk: Bool
+                        switch op.kind {
+                        case .window: typeOk = (refP.type == .window)
+                        case .door: typeOk = (refP.type == .door || refP.type == .opening)
+                        default: typeOk = false
+                        }
+                        if typeOk && simd_distance(wp, refP.pos) <= max(refP.width * 0.65, 0.75) {
+                            matched = true
+                            break
+                        }
+                    }
+                    if matched {
+                        score += 3.5
+                        semanticHits += 1
                     }
                 }
                 
-                for tr in uniqueTrans {
-                    let camW = rotCam + tr
-                    var score: Float = 0.0
-                    var inlierWeight: Float = 0.0
-                    var semanticHits = 0
-                    
-                    // i. Wall geometry agreement
-                    for pt in rotWalls {
-                        let wp = pt.pos + tr
-                        var bestDistSq: Float = .greatestFiniteMagnitude
-                        for ref in targets {
-                            guard abs(simd_dot(pt.normal, ref.normal)) > 0.78 else { continue }
-                            let dSq = Self.pointToSegmentDistanceSquared(p: wp, a: ref.start, b: ref.end)
-                            bestDistSq = min(bestDistSq, dSq)
-                        }
-                        let kernel = 1.0 / (1.0 + bestDistSq / 0.0625)
-                        score += pt.weight * kernel
-                        if bestDistSq <= 0.1225 {
-                            inlierWeight += pt.weight
+                // iii. Furniture occupation agreement
+                for fp in obsFurnClusters {
+                    let wp = mapPt(SIMD2<Float>(fp.pos.x, fp.pos.z))
+                    var matchedFurn = false
+                    for rf in furniture {
+                        let d = Self.distanceToOrientedBox2D(pt: wp, center: rf.pos, halfW: rf.halfW + 0.35, halfD: rf.halfD + 0.35, rotY: rf.rotY)
+                        if d <= 0.01 {
+                            matchedFurn = true
+                            break
                         }
                     }
-                    
-                    // ii. Portal agreement (Windows, Doors, Openings) — huge symmetry breaker!
-                    for op in rotPortals {
-                        let wp = op.pos + tr
-                        var matched = false
-                        for refP in portals {
-                            let typeOk: Bool
-                            switch op.kind {
-                            case .window: typeOk = (refP.type == .window)
-                            case .door: typeOk = (refP.type == .door || refP.type == .opening)
-                            default: typeOk = false
-                            }
-                            if typeOk && simd_distance(wp, refP.pos) <= max(refP.width * 0.65, 0.75) {
-                                matched = true
-                                break
-                            }
-                        }
-                        if matched {
-                            score += 3.5
-                            semanticHits += 1
-                        }
+                    if matchedFurn {
+                        score += 2.8
+                        semanticHits += 1
+                    } else if !furniture.isEmpty {
+                        score -= 0.75
                     }
-                    
-                    // iii. Furniture occupation agreement (Beds, Sofas, Tables, Desks) — huge corner disambiguator!
-                    for fp in rotFurn {
-                        let wp = fp + tr
-                        var matchedFurn = false
-                        for rf in furniture {
-                            let d = Self.distanceToOrientedBox2D(pt: wp, center: rf.pos, halfW: rf.halfW + 0.35, halfD: rf.halfD + 0.35, rotY: rf.rotY)
-                            if d <= 0.01 {
-                                matchedFurn = true
-                                break
-                            }
-                        }
-                        if matchedFurn {
-                            score += 2.8
-                            semanticHits += 1
-                        } else if !furniture.isEmpty {
-                            // Observed interior furniture where plan says open floor
-                            score -= 0.75
-                        }
-                    }
-                    
-                    // iv. Free-Space Ray Carving (Penalize rays passing straight through solid walls or furniture!)
-                    for ray in rotClearRays {
-                        let rayOrig = ray.origin + tr
-                        var rayBlockedByWall = false
-                        for ref in targets {
-                            if let hitD = Self.raySegmentIntersection(origin: rayOrig, dir: ray.dir, a: ref.start, b: ref.end) {
-                                if hitD > 0.25 && hitD < ray.dist - 0.40 {
-                                    // Check if hit falls inside a known door/opening/window
-                                    let hitPt = rayOrig + ray.dir * hitD
-                                    let isPortal = portals.contains { simd_distance($0.pos, hitPt) < ($0.width * 0.6 + 0.20) }
-                                    if !isPortal {
-                                        rayBlockedByWall = true
-                                        break
-                                    }
-                                }
-                            }
-                        }
-                        if rayBlockedByWall {
-                            score -= 1.2
-                        } else if ray.furnH {
-                            // Check if ray at 0.4m..1.25m height passes right through a tall scanned furniture item
-                            let midRay = rayOrig + ray.dir * (ray.dist * 0.5)
-                            for rf in furniture where rf.heightAboveFloor >= 0.55 {
-                                let d = Self.distanceToOrientedBox2D(pt: midRay, center: rf.pos, halfW: max(rf.halfW - 0.12, 0.1), halfD: max(rf.halfD - 0.12, 0.1), rotY: rf.rotY)
-                                if d <= 0.0 {
-                                    score -= 0.45
+                }
+                
+                // iv. Free-Space Ray Carving (strong penalty across solid plan walls without openings)
+                let wallBlockPenalty: Float = isPlanMode ? 1.75 : 1.2
+                for ray in clearRaySnapshot {
+                    let rayOrig = mapPt(ray.origin)
+                    let rayDir = rotDir(ray.dir)
+                    let rayDist = ray.clearDist * s
+                    var rayBlockedByWall = false
+                    for ref in targets {
+                        if let hitD = Self.raySegmentIntersection(origin: rayOrig, dir: rayDir, a: ref.start, b: ref.end) {
+                            if hitD > 0.25 && hitD < rayDist - 0.40 {
+                                let hitPt = rayOrig + rayDir * hitD
+                                let isPortal = portals.contains { simd_distance($0.pos, hitPt) < ($0.width * 0.6 + 0.25) }
+                                if !isPortal {
+                                    rayBlockedByWall = true
                                     break
                                 }
                             }
                         }
                     }
+                    if rayBlockedByWall {
+                        score -= wallBlockPenalty
+                    } else if ray.atFurnitureHeight {
+                        let midRay = rayOrig + rayDir * (rayDist * 0.5)
+                        for rf in furniture where rf.heightAboveFloor >= 0.55 {
+                            let d = Self.distanceToOrientedBox2D(pt: midRay, center: rf.pos, halfW: max(rf.halfW - 0.12, 0.1), halfD: max(rf.halfD - 0.12, 0.1), rotY: rf.rotY)
+                            if d <= 0.0 {
+                                score -= 0.45
+                                break
+                            }
+                        }
+                    }
+                }
+                
+                // v. Optional 1-Tap User Region Hint on Minimap
+                if let hint = hintPos {
+                    let hd = simd_distance(camW, hint)
+                    if hd <= 4.5 {
+                        score += 3.2 * exp(-(hd * hd) / 9.0)
+                    } else if hd > 6.5 {
+                        score -= 2.5
+                    }
+                }
+                
+                let inlierRatio = inlierWeight / totalWallWeight
+                let lookW = rotDir(arForward)
+                var facingName: String? = nil
+                var minFaceDist: Float = .greatestFiniteMagnitude
+                for ref in targets {
+                    if let d = Self.raySegmentIntersection(origin: camW, dir: lookW, a: ref.start, b: ref.end), d < minFaceDist {
+                        minFaceDist = d
+                        facingName = ref.displayName
+                    }
+                }
+                
+                return PoseHyp(
+                    yaw: yaw,
+                    tx: tr.x,
+                    tz: tr.y,
+                    scale: s,
+                    score: score,
+                    wallInlierRatio: inlierRatio,
+                    semanticMatches: semanticHits,
+                    facingName: facingName
+                )
+            }
+            
+            func collectHypotheses(forScale s: Float) -> [PoseHyp] {
+                var results: [PoseHyp] = []
+                for yaw in candidateYaws {
+                    let cosY = cos(yaw)
+                    let sinY = sin(yaw)
+                    func rotS(_ v: SIMD2<Float>) -> SIMD2<Float> {
+                        let vs = v * s
+                        return SIMD2<Float>(vs.x * cosY - vs.y * sinY, vs.x * sinY + vs.y * cosY)
+                    }
+                    func rotDir(_ v: SIMD2<Float>) -> SIMD2<Float> {
+                        SIMD2<Float>(v.x * cosY - v.y * sinY, v.x * sinY + v.y * cosY)
+                    }
                     
-                    let inlierRatio = inlierWeight / totalWallWeight
-                    let lookW = rot(arForward)
-                    var facingName: String? = nil
-                    var minFaceDist: Float = .greatestFiniteMagnitude
-                    for ref in targets {
-                        if let d = Self.raySegmentIntersection(origin: camW, dir: lookW, a: ref.start, b: ref.end), d < minFaceDist {
-                            minFaceDist = d
-                            facingName = ref.displayName
+                    let rotCam = rotS(camPosAR)
+                    let rotClusters = topClusters.map { (center: rotS($0.center), normal: rotDir($0.normal)) }
+                    var candidateTrans: [SIMD2<Float>] = []
+                    
+                    // A. 2-Wall Corner Intersection
+                    if rotClusters.count >= 2 {
+                        for i in 0..<rotClusters.count {
+                            let cA = rotClusters[i]
+                            for j in (i + 1)..<rotClusters.count {
+                                let cB = rotClusters[j]
+                                guard abs(cA.normal.x * cB.normal.y - cA.normal.y * cB.normal.x) > 0.35 else { continue }
+                                let matchA = targets.filter { abs(simd_dot(cA.normal, $0.normal)) > 0.85 }
+                                let matchB = targets.filter { abs(simd_dot(cB.normal, $0.normal)) > 0.85 }
+                                
+                                for rA in matchA {
+                                    let sA: Float = simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0
+                                    let nA = rA.normal * sA
+                                    let rhsA = rA.offset * sA - simd_dot(cA.center, nA)
+                                    for rB in matchB where rB.id != rA.id {
+                                        let sB: Float = simd_dot(cB.normal, rB.normal) >= 0 ? 1.0 : -1.0
+                                        let nB = rB.normal * sB
+                                        let rhsB = rB.offset * sB - simd_dot(cB.center, nB)
+                                        let det = nA.x * nB.y - nA.y * nB.x
+                                        guard abs(det) > 0.35 else { continue }
+                                        let tx = (rhsA * nB.y - rhsB * nA.y) / det
+                                        let tz = (nA.x * rhsB - nB.x * rhsA) / det
+                                        let camW = SIMD2<Float>(rotCam.x + tx, rotCam.y + tz)
+                                        if camW.x >= minB.x - 0.30 && camW.x <= maxB.x + 0.30 &&
+                                           camW.y >= minB.y - 0.30 && camW.y <= maxB.y + 0.30 {
+                                            candidateTrans.append(SIMD2<Float>(tx, tz))
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     
-                    allHypotheses.append(PoseHyp(
-                        yaw: yaw,
-                        tx: tr.x,
-                        tz: tr.y,
-                        score: score,
-                        wallInlierRatio: inlierRatio,
-                        semanticMatches: semanticHits,
-                        facingName: facingName
-                    ))
+                    // B. 1-Wall sliding fallback
+                    if candidateTrans.isEmpty {
+                        let cA = rotClusters[0]
+                        for rA in targets where abs(simd_dot(cA.normal, rA.normal)) > 0.88 {
+                            let sA: Float = simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0
+                            let nA = rA.normal * sA
+                            let perpShift = rA.offset * sA - simd_dot(cA.center, nA)
+                            let steps = max(Int(rA.length / 0.5), 2)
+                            for k in 0...steps {
+                                let targetPt = rA.start + rA.tangent * (rA.length * (Float(k) / Float(steps)))
+                                let alongShift = simd_dot(targetPt - cA.center, rA.tangent)
+                                let tr = nA * perpShift + rA.tangent * alongShift
+                                let camW = rotCam + tr
+                                if camW.x >= minB.x - 0.30 && camW.x <= maxB.x + 0.30 &&
+                                   camW.y >= minB.y - 0.30 && camW.y <= maxB.y + 0.30 {
+                                    candidateTrans.append(tr)
+                                }
+                            }
+                        }
+                    }
+                    
+                    var uniqueTrans: [SIMD2<Float>] = []
+                    for t in candidateTrans {
+                        if !uniqueTrans.contains(where: { simd_distance($0, t) < 0.20 }) {
+                            uniqueTrans.append(t)
+                        }
+                    }
+                    
+                    for tr in uniqueTrans {
+                        results.append(evaluateHypothesis(yaw: yaw, tr: tr, s: s))
+                    }
                 }
+                return results
             }
             
+            // Pass 1: Rigid SE(2) at scale 1.0
+            var allHypotheses = collectHypotheses(forScale: 1.0)
             allHypotheses.sort { $0.score > $1.score }
-            guard let best = allHypotheses.first, best.score > 0 else {
+            
+            // Pass 2: Similarity Sim(2) scale compensation when locating on a possibly mis-scaled plan
+            let rigidBestRatio = allHypotheses.first?.wallInlierRatio ?? 0.0
+            if isPlanMode && topClusters.count >= 2 && rigidBestRatio < 0.68 {
+                let candidateScales: [Float] = [0.85, 0.91, 0.95, 1.05, 1.11, 1.18]
+                for sCand in candidateScales {
+                    let sHyps = collectHypotheses(forScale: sCand)
+                    allHypotheses.append(contentsOf: sHyps)
+                }
+                allHypotheses.sort { $0.score > $1.score }
+            }
+            
+            guard var best = allHypotheses.first, best.score > 0 else {
                 DispatchQueue.main.async {
                     self.trackingStatusText = "Pan slowly across walls, doors & furniture..."
                 }
                 return
             }
             
-            // Find highest scoring distinct corner/rotation competitor
+            // Fine continuous local polish on top hypothesis
+            let dt: Float = 0.06
+            let dyaw: Float = 1.5 * .pi / 180.0
+            let ds: Float = isPlanMode ? 0.025 : 0.0
+            for dx in [-dt, 0, dt] {
+                for dz in [-dt, 0, dt] {
+                    for dr in [-dyaw, 0, dyaw] {
+                        let cand = evaluateHypothesis(
+                            yaw: Self.normalizeAngle(best.yaw + dr),
+                            tr: SIMD2<Float>(best.tx + dx, best.tz + dz),
+                            s: best.scale
+                        )
+                        if cand.score > best.score + 0.02 {
+                            best = cand
+                        }
+                    }
+                }
+            }
+            if ds > 0 {
+                for sDelta in [-ds, ds] {
+                    let candS = max(0.75, min(1.30, best.scale + sDelta))
+                    let cand = evaluateHypothesis(yaw: best.yaw, tr: SIMD2<Float>(best.tx, best.tz), s: candS)
+                    if cand.score > best.score + 0.04 {
+                        best = cand
+                    }
+                }
+            }
+            
+            // Find highest scoring distinct competitor
             let secondBest = allHypotheses.first { h in
                 let posDiff = hypot(h.tx - best.tx, h.tz - best.tz)
                 let angDiff = abs(Self.normalizeAngle(h.yaw - best.yaw))
@@ -1179,8 +1381,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             let margin = secondBest.map { best.score - $0.score } ?? 10.0
             
             // STRICT CERTAINTY + UNIQUENESS GATE
-            let hasSymmetryBreaker = (best.semanticMatches >= 1 && margin >= 1.1) || (margin >= 2.2) || (secondBest == nil)
-            let isConfident = hasCorner && best.wallInlierRatio >= 0.62 && hasSymmetryBreaker
+            let hasSymmetryBreaker = (best.semanticMatches >= 1 && margin >= 1.1) || (margin >= 2.2) || (secondBest == nil) || (hintPos != nil && margin >= 1.2)
+            let isConfident = hasCorner && best.wallInlierRatio >= 0.60 && hasSymmetryBreaker
             
             if isConfident {
                 if let prev = self.lastBestCandidate {
@@ -1194,16 +1396,18 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 } else {
                     self.consistentCandidateCount = 1
                 }
-                self.lastBestCandidate = (best.yaw, best.tx, best.tz)
+                self.lastBestCandidate = (best.yaw, best.tx, best.tz, best.scale)
                 
                 if self.consistentCandidateCount >= 2 {
                     self.transformLock.lock()
                     self.alignmentAngle = best.yaw
                     self.alignmentOffset = SIMD3<Float>(best.tx, 0, best.tz)
+                    self.effectiveScale = best.scale
                     self.transformLock.unlock()
                     
                     let prefix = isPlanMode ? "Plan" : "Room"
                     let landmarkNote = best.semanticMatches > 0 ? " + \(best.semanticMatches) landmarks" : ""
+                    let scaleNote = abs(best.scale - 1.0) >= 0.03 ? String(format: " (%.0f%% scale)", best.scale * 100.0) : ""
                     DispatchQueue.main.async {
                         if !self.isAutoLocalized {
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -1211,8 +1415,9 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                         self.isCalibrated = true
                         self.isAutoLocalized = true
                         self.localizationConfidence = best.wallInlierRatio
+                        self.lockedPlanScale = best.scale
                         self.localizedTargetName = best.facingName ?? "\(topClusters.count) walls"
-                        self.trackingStatusText = "✓ Locked on \(prefix) (\(Int(best.wallInlierRatio * 100))%\(landmarkNote))"
+                        self.trackingStatusText = "✓ Locked on \(prefix) (\(Int(best.wallInlierRatio * 100))%\(landmarkNote)\(scaleNote))"
                     }
                 } else {
                     DispatchQueue.main.async {
@@ -1227,7 +1432,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                     if !hasCorner {
                         self.trackingStatusText = "1 wall seen — pan to a corner, furniture, or window"
                     } else if !hasSymmetryBreaker {
-                        self.trackingStatusText = "Ambiguous corner — look at a window, door, or furniture"
+                        self.trackingStatusText = "Ambiguous corner — look at a doorway/window or tap minimap"
                     } else {
                         self.trackingStatusText = "Scanning room (\(Int(best.wallInlierRatio * 100))%)..."
                     }
@@ -1236,9 +1441,96 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         }
     }
     
+    // MARK: - Continuous Post-Lock Pose Refinement (Prevents VIO Drift Across Rooms)
+    
+    private func triggerContinuousPoseRefinement(camPosAR: SIMD2<Float>) {
+        let targets = referenceTargets
+        guard !targets.isEmpty else { return }
+        
+        let vPlaneSnapshots: [(transform: simd_float4x4, width: Float)] = verticalPlaneAnchors.values.map { plane in
+            let w: Float
+            if #available(iOS 16.0, *) { w = max(plane.planeExtent.width, 0.35) }
+            else { w = max(plane.extent.x, 0.35) }
+            return (transform: plane.transform, width: w)
+        }
+        let raySnapshot = Array(observedRayPoints.suffix(25))
+        
+        transformLock.lock()
+        let curYaw = alignmentAngle
+        let curOff = alignmentOffset
+        let curScale = effectiveScale
+        transformLock.unlock()
+        
+        solverQueue.async { [weak self] in
+            guard let self = self else { return }
+            var pts: [(pos: SIMD2<Float>, normal: SIMD2<Float>, weight: Float)] = []
+            for vp in vPlaneSnapshots {
+                let wt = vp.transform
+                let c = SIMD2<Float>(wt.columns.3.x, wt.columns.3.z)
+                let col1 = SIMD2<Float>(wt.columns.1.x, wt.columns.1.z)
+                guard simd_length(col1) > 0.2 else { continue }
+                var norm = simd_normalize(col1)
+                if simd_dot(norm, camPosAR - c) < 0 { norm = -norm }
+                pts.append((c, norm, 2.0))
+            }
+            for rp in raySnapshot {
+                pts.append((rp.pos, rp.normal, 1.0))
+            }
+            guard pts.count >= 3 else { return }
+            
+            func localScore(yaw: Float, tx: Float, tz: Float, sc: Float) -> Float {
+                let c = cos(yaw), s = sin(yaw)
+                let camSX = camPosAR.x * sc, camSZ = camPosAR.y * sc
+                let camW = SIMD2<Float>(camSX * c - camSZ * s + tx, camSX * s + camSZ * c + tz)
+                var total: Float = 0.0
+                for p in pts {
+                    let px = p.pos.x * sc, pz = p.pos.y * sc
+                    let wp = SIMD2<Float>(px * c - pz * s + tx, px * s + pz * c + tz)
+                    let wn = SIMD2<Float>(p.normal.x * c - p.normal.y * s, p.normal.x * s + p.normal.y * c)
+                    var bestD: Float = .greatestFiniteMagnitude
+                    for ref in targets {
+                        guard abs(simd_dot(wn, ref.normal)) > 0.80 else { continue }
+                        let sideSign: Float = simd_dot(camW - ref.center, ref.normal) >= 0 ? 1.0 : -1.0
+                        let faceShift = ref.normal * (sideSign * min(ref.thickness * 0.5, 0.14))
+                        let dSq = Self.pointToSegmentDistanceSquared(p: wp, a: ref.start + faceShift, b: ref.end + faceShift)
+                        bestD = min(bestD, dSq)
+                    }
+                    total += p.weight / (1.0 + bestD / 0.04)
+                }
+                return total
+            }
+            
+            let baseScore = localScore(yaw: curYaw, tx: curOff.x, tz: curOff.z, sc: curScale)
+            var bestY = curYaw, bestX = curOff.x, bestZ = curOff.z, bestScore = baseScore
+            
+            let stepT: Float = 0.05
+            let stepR: Float = 1.5 * .pi / 180.0
+            for dx in [-stepT, 0, stepT] {
+                for dz in [-stepT, 0, stepT] {
+                    for dr in [-stepR, 0, stepR] {
+                        let sc = localScore(yaw: curYaw + dr, tx: curOff.x + dx, tz: curOff.z + dz, sc: curScale)
+                        if sc > bestScore {
+                            bestScore = sc
+                            bestY = Self.normalizeAngle(curYaw + dr)
+                            bestX = curOff.x + dx
+                            bestZ = curOff.z + dz
+                        }
+                    }
+                }
+            }
+            
+            if bestScore > baseScore + 0.08 {
+                self.transformLock.lock()
+                self.alignmentAngle = bestY
+                self.alignmentOffset = SIMD3<Float>(curOff.x * 0.45 + bestX * 0.55, 0, curOff.z * 0.45 + bestZ * 0.55)
+                self.transformLock.unlock()
+            }
+        }
+    }
+    
     // MARK: - Live Discrepancy Detection (Missing Objects & New Objects)
     
-    private func evaluateLiveDiscrepancies(frame: ARFrame, camPosAR: SIMD3<Float>, yaw: Float, offset: SIMD3<Float>) {
+    private func evaluateLiveDiscrepancies(frame: ARFrame, camPosAR: SIMD3<Float>, yaw: Float, offset: SIMD3<Float>, curScale: Float) {
         guard #available(iOS 14.0, *),
               let depthBuf = (frame.smoothedSceneDepth ?? frame.sceneDepth)?.depthMap else { return }
         
@@ -1266,8 +1558,9 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         let sinY = sin(-yaw)
         
         func roomToAR(_ rx: Float, _ ry: Float, _ rz: Float) -> SIMD3<Float> {
-            let dx = rx - offset.x
-            let dz = rz - offset.z
+            let invS = 1.0 / max(curScale, 0.2)
+            let dx = (rx - offset.x) * invS
+            let dz = (rz - offset.z) * invS
             let ax = dx * cosY - dz * sinY
             let az = dx * sinY + dz * cosY
             let ay = estimatedFloorY + max(ry - roomFloorY, 0.25)
@@ -1277,14 +1570,18 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         func arToRoom(_ ax: Float, _ ay: Float, _ az: Float) -> SIMD3<Float> {
             let cF = cos(yaw)
             let sF = sin(yaw)
-            let rx = ax * cF - az * sF + offset.x
-            let rz = ax * sF + az * cF + offset.z
+            let sx = ax * curScale
+            let sz = az * curScale
+            let rx = sx * cF - sz * sF + offset.x
+            let rz = sx * sF + sz * cF + offset.z
             let ry = roomFloorY + max(ay - estimatedFloorY, 0.0)
             return SIMD3<Float>(rx, ry, rz)
         }
         
-        let camRoomX = camPosAR.x * cos(yaw) - camPosAR.z * sin(yaw) + offset.x
-        let camRoomZ = camPosAR.x * sin(yaw) + camPosAR.z * cos(yaw) + offset.z
+        let camScaledX = camPosAR.x * curScale
+        let camScaledZ = camPosAR.z * curScale
+        let camRoomX = camScaledX * cos(yaw) - camScaledZ * sin(yaw) + offset.x
+        let camRoomZ = camScaledX * sin(yaw) + camScaledZ * cos(yaw) + offset.z
         let camRoomXZ = SIMD2<Float>(camRoomX, camRoomZ)
         
         // A. Check for MISSING expected furniture directly in front of the camera

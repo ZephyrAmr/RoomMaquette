@@ -96,6 +96,12 @@ public struct ImportedPlan: Identifiable, Codable, Equatable, Hashable {
     // Extracted vector lines for CAD/SVG/PDF
     public var vectorLines: [PlanLine]
     
+    // Architectural openings & furniture extracted from imported plan (if detected)
+    public var detectedDoors: [DoorSurface]?
+    public var detectedWindows: [WindowSurface]?
+    public var detectedOpenings: [OpeningSurface]?
+    public var isHeuristicScale: Bool?
+    
     // Scan-to-Plan alignment
     public var alignment: PlanAlignmentTransform
     
@@ -111,6 +117,10 @@ public struct ImportedPlan: Identifiable, Codable, Equatable, Hashable {
         originalDepthMeters: Float = 10.0,
         renderedImageData: Data? = nil,
         vectorLines: [PlanLine] = [],
+        detectedDoors: [DoorSurface]? = nil,
+        detectedWindows: [WindowSurface]? = nil,
+        detectedOpenings: [OpeningSurface]? = nil,
+        isHeuristicScale: Bool? = nil,
         alignment: PlanAlignmentTransform = PlanAlignmentTransform(),
         sourceText: String? = nil
     ) {
@@ -122,6 +132,10 @@ public struct ImportedPlan: Identifiable, Codable, Equatable, Hashable {
         self.originalDepthMeters = originalDepthMeters
         self.renderedImageData = renderedImageData
         self.vectorLines = vectorLines
+        self.detectedDoors = detectedDoors
+        self.detectedWindows = detectedWindows
+        self.detectedOpenings = detectedOpenings
+        self.isHeuristicScale = isHeuristicScale
         self.alignment = alignment
         self.sourceText = sourceText
     }

@@ -184,6 +184,9 @@ public struct MaquetteWorkspaceView: View {
                         room.importedPlan = updatedPlan
                         if room.notes.hasPrefix("Created from imported plan:") {
                             room.walls = PlanImporter.synthesizeWalls(from: updatedPlan)
+                            if let ds = updatedPlan.detectedDoors { room.doors = ds }
+                            if let ws = updatedPlan.detectedWindows { room.windows = ws }
+                            if let os = updatedPlan.detectedOpenings { room.openings = os }
                         }
                         persistRoom()
                     }
