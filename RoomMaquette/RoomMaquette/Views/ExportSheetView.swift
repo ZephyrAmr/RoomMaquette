@@ -139,6 +139,7 @@ public struct ExportSheetView: View {
                                 .foregroundColor(.primary)
                             
                             formatRow(for: .usdz)
+                            formatRow(for: .ifc)
                             formatRow(for: .obj)
                             formatRow(for: .stl)
                             formatRow(for: .gltf)

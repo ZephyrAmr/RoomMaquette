@@ -30,6 +30,7 @@
 		78982C5FA7D4B9E81048EADB /* PNGExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826556AC99DD97A6FF241F6C /* PNGExporter.swift */; };
 		48FAB0879E627D33E532AAF3 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68E34C80ADA7581998481306 /* PDFExporter.swift */; };
 		2BE326F6EB3C18D2514BDE32 /* SVGExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F96A76CD059F41820EA31E /* SVGExporter.swift */; };
+		D11100010000000000000001 /* IFCExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11100020000000000000001 /* IFCExporter.swift */; };
 		CFF406D8188C353F2C08113A /* HomeDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB949DEBC50C36F9C1ED274A /* HomeDashboardView.swift */; };
 		D3DCF422685ECA5CA9950D4C /* RoomScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81AAED430F1454E0DA324C96 /* RoomScanView.swift */; };
 		F55B1BFD1C10F4DB22CBE8CD /* MaquetteWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E310DA1AFB4FAB851CDDE86A /* MaquetteWorkspaceView.swift */; };
@@ -77,6 +78,7 @@
 		826556AC99DD97A6FF241F6C /* PNGExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PNGExporter.swift"; sourceTree = "<group>"; };
 		68E34C80ADA7581998481306 /* PDFExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PDFExporter.swift"; sourceTree = "<group>"; };
 		59F96A76CD059F41820EA31E /* SVGExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SVGExporter.swift"; sourceTree = "<group>"; };
+		D11100020000000000000001 /* IFCExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IFCExporter.swift"; sourceTree = "<group>"; };
 		AB949DEBC50C36F9C1ED274A /* HomeDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HomeDashboardView.swift"; sourceTree = "<group>"; };
 		81AAED430F1454E0DA324C96 /* RoomScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RoomScanView.swift"; sourceTree = "<group>"; };
 		E310DA1AFB4FAB851CDDE86A /* MaquetteWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MaquetteWorkspaceView.swift"; sourceTree = "<group>"; };
@@ -164,6 +166,7 @@
 				826556AC99DD97A6FF241F6C /* PNGExporter.swift */,
 				68E34C80ADA7581998481306 /* PDFExporter.swift */,
 				59F96A76CD059F41820EA31E /* SVGExporter.swift */,
+				D11100020000000000000001 /* IFCExporter.swift */,
 			);
 			path = Exporters; sourceTree = "<group>";
 		};
@@ -326,6 +329,7 @@
 				78982C5FA7D4B9E81048EADB /* PNGExporter.swift in Sources */,
 				48FAB0879E627D33E532AAF3 /* PDFExporter.swift in Sources */,
 				2BE326F6EB3C18D2514BDE32 /* SVGExporter.swift in Sources */,
+				D11100010000000000000001 /* IFCExporter.swift in Sources */,
 				CFF406D8188C353F2C08113A /* HomeDashboardView.swift in Sources */,
 				D3DCF422685ECA5CA9950D4C /* RoomScanView.swift in Sources */,
 				F55B1BFD1C10F4DB22CBE8CD /* MaquetteWorkspaceView.swift in Sources */,

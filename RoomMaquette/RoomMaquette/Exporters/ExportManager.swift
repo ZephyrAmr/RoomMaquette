@@ -7,6 +7,7 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
     case obj = "OBJ + MTL (Universal 3D Mesh)"
     case stl = "STL (3D Printable Maquette)"
     case gltf = "glTF 2.0 (Web 3D & Blender)"
+    case ifc = "IFC 4 (BIM / Revit / BlenderBIM)"
     case dxf = "DXF (AutoCAD & CAD Plans)"
     
     // 2D Formats
@@ -25,6 +26,7 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
         case .obj: return "obj"
         case .stl: return "stl"
         case .gltf: return "gltf"
+        case .ifc: return "ifc"
         case .dxf: return "dxf"
         case .png: return "png"
         case .pdf: return "pdf"
@@ -39,6 +41,7 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
         case .obj: return "cube.fill"
         case .stl: return "printer.fill"
         case .gltf: return "globe"
+        case .ifc: return "building.2.fill"
         case .dxf: return "ruler.fill"
         case .png: return "photo.fill"
         case .pdf: return "doc.richtext.fill"
@@ -49,7 +52,7 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
     
     public var category: String {
         switch self {
-        case .usdz, .obj, .stl, .gltf, .dxf:
+        case .usdz, .obj, .stl, .gltf, .ifc, .dxf:
             return "3D Model Formats"
         case .png, .pdf, .svg:
             return "2D & Documentation Formats"
@@ -68,6 +71,8 @@ public enum ExportFormat: String, CaseIterable, Identifiable {
             return "Manifold solid mesh designed specifically for 3D printing physical scale models and physical maquettes."
         case .gltf:
             return "Modern self-contained glTF 2.0 format with embedded materials for web 3D, Three.js, and Babylon.js."
+        case .ifc:
+            return "Industry Foundation Classes (IFC4 STEP) BIM file with structural walls, voided doors/windows/openings, floor slab, furniture, and spatial metrics."
         case .dxf:
             return "AutoCAD Drawing Exchange format with organized layers (WALLS, DOORS, WINDOWS, FURNITURE, DIMS)."
         case .png:
@@ -115,6 +120,10 @@ public class ExportManager {
             
         case .gltf:
             let url = try GLTFExporter.export(room: room)
+            return [url]
+            
+        case .ifc:
+            let url = try IFCExporter.export(room: room)
             return [url]
             
         case .dxf:
