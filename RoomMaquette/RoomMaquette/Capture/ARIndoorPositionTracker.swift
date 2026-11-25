@@ -675,7 +675,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 pos: p2,
                 halfW: obj.width * 0.5,
                 halfD: obj.depth * 0.5,
-                rotY: obj.rotationY + (usePlanSpace ? (align?.rotationAngle ?? 0) : 0),
+                rotY: obj.rotationY + (alignPortals?.rotationAngle ?? 0),
                 heightAboveFloor: max(obj.height, 0.35)
             ))
         }
