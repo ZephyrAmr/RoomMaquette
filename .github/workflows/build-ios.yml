@@ -2,7 +2,7 @@ name: Build iOS RoomMaquette
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'non-pro*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -137,6 +137,23 @@ jobs:
             ### 📦 Direct Downloads:
             - **[RoomMaquette.ipa](https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette.ipa)** (Unsigned iOS app)
             - **[RoomMaquette-Simulator.app.zip](https://github.com/ZephyrAmr/RoomMaquette/releases/latest/download/RoomMaquette-Simulator.app.zip)** (Xcode Simulator)
+          files: |
+            RoomMaquette.ipa
+            RoomMaquette-unsigned.ipa
+            RoomMaquette-Simulator.app.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Non-Pro Branch Release
+        if: startsWith(github.ref, 'refs/heads/non-pro')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: non-pro-locate-me
+          name: "RoomMaquette Non-Pro Locate Me"
+          prerelease: true
+          body: |
+            ## 📱 Non-Pro Locate Me Build (`non-pro-locate-me`)
+            - **SideStore Direct Install**: [Install Non-Pro IPA in SideStore](sidestore://install?url=https://github.com/ZephyrAmr/RoomMaquette/releases/download/non-pro-locate-me/RoomMaquette.ipa)
           files: |
             RoomMaquette.ipa
             RoomMaquette-unsigned.ipa

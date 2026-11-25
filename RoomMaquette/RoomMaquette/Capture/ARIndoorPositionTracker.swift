@@ -4,6 +4,8 @@ import Metal
 import Combine
 import SwiftUI
 import CoreVideo
+import CoreImage
+import Vision
 import simd
 
 public struct ReferenceWallTarget: Identifiable {
@@ -134,6 +136,14 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     private var clearRays: [ClearRay] = []
     private var frameCount: Int = 0
     
+    // Non-LiDAR RGB / Sparse-Cloud Fallbacks
+    private var observedVisionPortals: [ObservedLandmark] = []
+    private var observedFeatureWalls: [ObservedWallPoint] = []
+    private let visionQueue = DispatchQueue(label: "com.roommaquette.visionlocate", qos: .userInitiated)
+    private static let visionCIContext = CIContext(options: [.useSoftwareRenderer: false])
+    private var isAnalyzingVision: Bool = false
+    private var lastVisionTime: TimeInterval = 0
+    
     // Background Solver State
     private let solverQueue = DispatchQueue(label: "com.roommaquette.localization", qos: .userInitiated)
     private var isSolving: Bool = false
@@ -217,6 +227,10 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.observedRayPoints.removeAll()
         self.observedDepthObstacles.removeAll()
         self.clearRays.removeAll()
+        self.observedVisionPortals.removeAll()
+        self.observedFeatureWalls.removeAll()
+        self.lastVisionTime = 0
+        self.isAnalyzingVision = false
         self.missingStrikes.removeAll()
         self.newObjectStrikes.removeAll()
         self.dismissedMissingIds.removeAll()
@@ -273,6 +287,10 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.observedRayPoints.removeAll()
         self.observedDepthObstacles.removeAll()
         self.clearRays.removeAll()
+        self.observedVisionPortals.removeAll()
+        self.observedFeatureWalls.removeAll()
+        self.lastVisionTime = 0
+        self.isAnalyzingVision = false
         self.missingStrikes.removeAll()
         self.newObjectStrikes.removeAll()
         self.trackingStatusText = "Relocalizing... Pan across walls, furniture & windows"
@@ -302,12 +320,21 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             }
         }
         
-        // 2. Sample vertical walls + dense LiDAR depth (for furniture obstacles & clear-air rays)
+        // 2. Sample vertical walls + dense LiDAR depth (or sparse feature cloud fallback on non-Pro)
         if frameCount % 4 == 0 {
             if !isAutoLocalized {
                 sampleHorizontalVerticalWallFan(frame: frame, camPos: rawPos)
             }
-            sampleSceneDepthFeatures(frame: frame, camPos: rawPos)
+            if #available(iOS 14.0, *), (frame.smoothedSceneDepth ?? frame.sceneDepth) != nil {
+                sampleSceneDepthFeatures(frame: frame, camPos: rawPos)
+            } else {
+                sampleRawFeatureCloudFeatures(frame: frame, camPos: rawPos)
+            }
+        }
+        
+        // 2b. Throttled Vision door/window detection when LiDAR mesh classification is unavailable
+        if !isAutoLocalized && meshExtracts.isEmpty && !isAnalyzingVision && (Date().timeIntervalSince1970 - lastVisionTime) > 0.65 {
+            triggerVisionPortalDetection(frame: frame, camPos: rawPos)
         }
         
         // 3. Solve rigid SE(2) pose until locked with high certainty + uniqueness
@@ -758,6 +785,309 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         }
     }
     
+    // MARK: - Non-LiDAR Fallbacks (ARKit Sparse Feature Cloud + Vision Portals)
+    
+    private func addFeatureWallPoint(_ pt: ObservedWallPoint) {
+        for i in 0..<observedFeatureWalls.count {
+            if simd_distance(observedFeatureWalls[i].pos, pt.pos) < 0.25 &&
+               simd_dot(observedFeatureWalls[i].normal, pt.normal) > 0.85 {
+                observedFeatureWalls[i] = pt
+                return
+            }
+        }
+        observedFeatureWalls.append(pt)
+        if observedFeatureWalls.count > 36 {
+            observedFeatureWalls.removeFirst()
+        }
+    }
+    
+    private func addVisionPortal(_ lm: ObservedLandmark) {
+        let p2 = SIMD2<Float>(lm.pos.x, lm.pos.z)
+        for i in 0..<observedVisionPortals.count {
+            let ep = SIMD2<Float>(observedVisionPortals[i].pos.x, observedVisionPortals[i].pos.z)
+            if simd_distance(ep, p2) < 0.70 {
+                observedVisionPortals[i].pos = (observedVisionPortals[i].pos + lm.pos) * 0.5
+                observedVisionPortals[i].timestamp = lm.timestamp
+                return
+            }
+        }
+        observedVisionPortals.append(lm)
+        if observedVisionPortals.count > 18 {
+            observedVisionPortals.removeFirst()
+        }
+    }
+    
+    private func sampleRawFeatureCloudFeatures(frame: ARFrame, camPos: SIMD3<Float>) {
+        guard let rawPts = frame.rawFeaturePoints?.points, !rawPts.isEmpty else { return }
+        let camXZ = SIMD2<Float>(camPos.x, camPos.z)
+        let now = Date().timeIntervalSince1970
+        
+        var clearStep = max(rawPts.count / 12, 1)
+        if clearStep < 1 { clearStep = 1 }
+        
+        var furnBins: [String: [SIMD3<Float>]] = [:]
+        var wallBandXZ: [SIMD2<Float>] = []
+        
+        for idx in stride(from: 0, to: rawPts.count, by: 1) {
+            let wp = rawPts[idx]
+            let hAboveFloor = wp.y - estimatedFloorY
+            let wpXZ = SIMD2<Float>(wp.x, wp.z)
+            let rayVec = wpXZ - camXZ
+            let rayLen = simd_length(rayVec)
+            guard rayLen >= 0.55 && rayLen <= 7.5 else { continue }
+            
+            // 1. Clear-space rays up to sparse surface hits
+            if idx % clearStep == 0 && rayLen >= 0.75 {
+                let rayDir = rayVec / rayLen
+                let atFurnH = (hAboveFloor >= 0.40 && hAboveFloor <= 1.25)
+                let clearD = max(rayLen - 0.15, 0.50)
+                clearRays.append(ClearRay(origin: camXZ, dir: rayDir, clearDist: clearD, atFurnitureHeight: atFurnH))
+                if clearRays.count > 45 { clearRays.removeFirst() }
+            }
+            
+            // 2. Furniture-height feature points away from walls (requires >= 3 nearby points per bin)
+            if hAboveFloor >= 0.28 && hAboveFloor <= 1.20 && rayLen <= 4.5 {
+                let bx = Int((wp.x / 0.35).rounded())
+                let bz = Int((wp.z / 0.35).rounded())
+                let key = "\(bx)_\(bz)"
+                furnBins[key, default: []].append(wp)
+            }
+            
+            // 3. Upper-wall band points for collinear wall fitting (above furniture, below ceiling)
+            if !isAutoLocalized && hAboveFloor >= 1.25 && hAboveFloor <= 2.35 && wallBandXZ.count < 48 {
+                wallBandXZ.append(wpXZ)
+            }
+        }
+        
+        // Emit clustered furniture obstacles (filtering out points right on vertical wall planes)
+        for (_, pts) in furnBins where pts.count >= 3 {
+            var sum = SIMD3<Float>.zero
+            for p in pts { sum += p }
+            let avg = sum / Float(pts.count)
+            let avgXZ = SIMD2<Float>(avg.x, avg.z)
+            
+            var nearVerticalWall = false
+            for vp in verticalPlaneAnchors.values {
+                let vc = SIMD2<Float>(vp.transform.columns.3.x, vp.transform.columns.3.z)
+                let vn = simd_normalize(SIMD2<Float>(vp.transform.columns.1.x, vp.transform.columns.1.z))
+                if abs(simd_dot(avgXZ - vc, vn)) < 0.32 && simd_distance(avgXZ, vc) < 2.2 {
+                    nearVerticalWall = true
+                    break
+                }
+            }
+            if !nearVerticalWall {
+                let hAbove = max(avg.y - estimatedFloorY, 0.45)
+                let lm = ObservedLandmark(
+                    pos: avg,
+                    kind: .furniture(label: "Object", category: .generic, estWidth: 0.65, estDepth: 0.65, estHeight: hAbove),
+                    timestamp: now
+                )
+                addDepthObstacle(lm)
+            }
+        }
+        
+        // Lightweight 2D RANSAC wall line fit on upper-wall sparse feature points
+        if !isAutoLocalized && wallBandXZ.count >= 6 {
+            let nPts = wallBandXZ.count
+            var bestInliers: [SIMD2<Float>] = []
+            var bestDir = SIMD2<Float>(1, 0)
+            
+            let seedLimit = min(nPts, 20)
+            for i in 0..<seedLimit {
+                for j in (i + 1)..<seedLimit {
+                    let diff = wallBandXZ[j] - wallBandXZ[i]
+                    let segLen = simd_length(diff)
+                    guard segLen >= 0.35 && segLen <= 4.5 else { continue }
+                    let dir = diff / segLen
+                    let norm = SIMD2<Float>(-dir.y, dir.x)
+                    let origin = wallBandXZ[i]
+                    
+                    var inliers: [SIMD2<Float>] = []
+                    for p in wallBandXZ {
+                        let dVec = p - origin
+                        let perp = abs(simd_dot(dVec, norm))
+                        let along = simd_dot(dVec, dir)
+                        if perp <= 0.06 && along >= -0.6 && along <= segLen + 0.6 {
+                            inliers.append(p)
+                        }
+                    }
+                    if inliers.count > bestInliers.count {
+                        bestInliers = inliers
+                        bestDir = dir
+                    }
+                }
+            }
+            
+            if bestInliers.count >= 5 {
+                var minT: Float = .greatestFiniteMagnitude
+                var maxT: Float = -.greatestFiniteMagnitude
+                var sum = SIMD2<Float>.zero
+                for p in bestInliers {
+                    sum += p
+                    let t = simd_dot(p, bestDir)
+                    minT = min(minT, t)
+                    maxT = max(maxT, t)
+                }
+                if (maxT - minT) >= 0.40 {
+                    let center = sum / Float(bestInliers.count)
+                    var norm = SIMD2<Float>(-bestDir.y, bestDir.x)
+                    if simd_dot(norm, camXZ - center) < 0 { norm = -norm }
+                    addFeatureWallPoint(ObservedWallPoint(pos: center, normal: norm, weight: 0.85, timestamp: now))
+                }
+            }
+        }
+    }
+    
+    private func triggerVisionPortalDetection(frame: ARFrame, camPos: SIMD3<Float>) {
+        let now = Date().timeIntervalSince1970
+        lastVisionTime = now
+        isAnalyzingVision = true
+        
+        // Downscale by 0.5x into an independent CGImage immediately so ARFrame/CVPixelBuffer is never retained
+        let ciImg = CIImage(cvPixelBuffer: frame.capturedImage)
+            .transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
+        guard let cgImg = Self.visionCIContext.createCGImage(ciImg, from: ciImg.extent) else {
+            isAnalyzingVision = false
+            return
+        }
+        
+        let camT = frame.camera.transform
+        let invCamT = simd_inverse(camT)
+        let K = frame.camera.intrinsics
+        let imgRes = frame.camera.imageResolution
+        let curFloorY = estimatedFloorY
+        let rawPts = frame.rawFeaturePoints?.points ?? []
+        let vPlaneSnapshots: [(pos: SIMD3<Float>, normal: SIMD3<Float>, width: Float)] = verticalPlaneAnchors.values.map { p in
+            let wt = p.transform
+            let w: Float
+            if #available(iOS 16.0, *) { w = max(p.planeExtent.width, 0.35) } else { w = max(p.extent.x, 0.35) }
+            return (
+                pos: SIMD3<Float>(wt.columns.3.x, wt.columns.3.y, wt.columns.3.z),
+                normal: simd_normalize(SIMD3<Float>(wt.columns.1.x, wt.columns.1.y, wt.columns.1.z)),
+                width: w
+            )
+        }
+        
+        visionQueue.async { [weak self] in
+            guard let self = self else { return }
+            defer {
+                DispatchQueue.main.async {
+                    self.isAnalyzingVision = false
+                }
+            }
+            
+            guard imgRes.width > 16, imgRes.height > 16 else { return }
+            let fx = K.columns.0.x
+            let fy = K.columns.1.y
+            let cx = K.columns.2.x
+            let cy = K.columns.2.y
+            guard fx > 1, fy > 1 else { return }
+            
+            let req = VNDetectRectanglesRequest()
+            req.minimumAspectRatio = 0.25
+            req.maximumAspectRatio = 2.5
+            req.minimumSize = 0.14
+            req.minimumConfidence = 0.70
+            req.quadratureTolerance = 20.0
+            req.maximumObservations = 4
+            
+            let handler = VNImageRequestHandler(cgImage: cgImg, orientation: .up, options: [:])
+            do {
+                try handler.perform([req])
+            } catch {
+                return
+            }
+            
+            guard let results = req.results, !results.isEmpty else { return }
+            
+            func worldRayDir(normX: CGFloat, visionNormY: CGFloat) -> SIMD3<Float> {
+                let u = Float(normX) * Float(imgRes.width)
+                let v = Float(1.0 - visionNormY) * Float(imgRes.height)
+                let lx = (u - cx) / fx
+                let ly = -(v - cy) / fy
+                let localDir = simd_normalize(SIMD3<Float>(lx, ly, -1.0))
+                let wd4 = simd_mul(camT, SIMD4<Float>(localDir, 0.0))
+                return simd_normalize(SIMD3<Float>(wd4.x, wd4.y, wd4.z))
+            }
+            
+            var detectedPortals: [ObservedLandmark] = []
+            let detectTime = Date().timeIntervalSince1970
+            
+            for rect in results {
+                let box = rect.boundingBox
+                let dirMid = worldRayDir(normX: box.midX, visionNormY: box.midY)
+                
+                // 1. Estimate metric distance d to this rectangle from vertical ARPlaneAnchors or rawFeaturePoints
+                var bestDist: Float? = nil
+                for vp in vPlaneSnapshots {
+                    let denom = simd_dot(dirMid, vp.normal)
+                    guard abs(denom) > 0.22 else { continue }
+                    let t = simd_dot(vp.pos - camPos, vp.normal) / denom
+                    guard t >= 0.70 && t <= 6.5 else { continue }
+                    let hit = camPos + dirMid * t
+                    let horizDist = hypot(hit.x - vp.pos.x, hit.z - vp.pos.z)
+                    if horizDist <= vp.width * 0.70 + 0.65 {
+                        if bestDist == nil || t < bestDist! {
+                            bestDist = t
+                        }
+                    }
+                }
+                
+                if bestDist == nil && !rawPts.isEmpty {
+                    let paddedBox = box.insetBy(dx: -0.04, dy: -0.04)
+                    var depths: [Float] = []
+                    for pt in rawPts {
+                        let lp = simd_mul(invCamT, SIMD4<Float>(pt, 1.0))
+                        let zDepth = -lp.z
+                        guard zDepth >= 0.70 && zDepth <= 6.5 else { continue }
+                        let uNorm = CGFloat((cx + fx * (lp.x / zDepth)) / Float(imgRes.width))
+                        let vNormImg = CGFloat((cy - fy * (lp.y / zDepth)) / Float(imgRes.height))
+                        let visY = 1.0 - vNormImg
+                        if paddedBox.contains(CGPoint(x: uNorm, y: visY)) {
+                            depths.append(zDepth)
+                        }
+                    }
+                    if depths.count >= 2 {
+                        depths.sort()
+                        bestDist = depths[depths.count / 2]
+                    }
+                }
+                
+                guard let dist = bestDist else { continue }
+                
+                // 2. Orientation-invariant 3D bounds using the 4 world corners in gravity space
+                let c0 = camPos + worldRayDir(normX: box.minX, visionNormY: box.minY) * dist
+                let c1 = camPos + worldRayDir(normX: box.maxX, visionNormY: box.minY) * dist
+                let c2 = camPos + worldRayDir(normX: box.maxX, visionNormY: box.maxY) * dist
+                let c3 = camPos + worldRayDir(normX: box.minX, visionNormY: box.maxY) * dist
+                
+                let minY = min(c0.y, c1.y, c2.y, c3.y)
+                let maxY = max(c0.y, c1.y, c2.y, c3.y)
+                let worldHeight = maxY - minY
+                let bottomAboveFloor = minY - curFloorY
+                let spanA = hypot(c1.x - c0.x, c1.z - c0.z)
+                let spanB = hypot(c3.x - c0.x, c3.z - c0.z)
+                let worldWidth = max(spanA, spanB)
+                
+                let center3D = camPos + dirMid * dist
+                
+                if bottomAboveFloor <= 0.45 && worldHeight >= 1.45 && worldWidth >= 0.50 && worldWidth <= 1.95 {
+                    detectedPortals.append(ObservedLandmark(pos: center3D, kind: .door, timestamp: detectTime))
+                } else if bottomAboveFloor > 0.45 && bottomAboveFloor <= 1.65 && worldHeight >= 0.50 && worldHeight <= 2.25 && worldWidth >= 0.45 && worldWidth <= 3.20 {
+                    detectedPortals.append(ObservedLandmark(pos: center3D, kind: .window, timestamp: detectTime))
+                }
+            }
+            
+            if !detectedPortals.isEmpty {
+                DispatchQueue.main.async {
+                    for portal in detectedPortals {
+                        self.addVisionPortal(portal)
+                    }
+                }
+            }
+        }
+    }
+    
     // MARK: - Multi-Modal Rigid SE(2) Solver (Walls + Furniture + Windows/Doors + Free Space)
     
     private func triggerLocalizationSolve(camPosAR: SIMD2<Float>, arForward: SIMD2<Float>) {
@@ -789,6 +1119,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         
         let meshList = Array(meshExtracts.values)
         let rayPointsSnapshot = observedRayPoints
+        let featureWallsSnapshot = observedFeatureWalls
+        let visionPortalsSnapshot = observedVisionPortals
         let depthObstaclesSnapshot = observedDepthObstacles
         let clearRaySnapshot = Array(clearRays.suffix(24))
         
@@ -833,6 +1165,12 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 }
             }
             obsWalls.append(contentsOf: rayPointsSnapshot)
+            obsWalls.append(contentsOf: featureWallsSnapshot)
+            
+            // Vision-detected door/window hints when LiDAR mesh classification is unavailable
+            for vp in visionPortalsSnapshot {
+                Self.mergeLandmark(vp, into: &obsPortals, radius: 0.70)
+            }
             
             // 1b. Mesh semantics (walls, windows, doors, tables, seats)
             for ext in meshList {
@@ -1239,26 +1577,44 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     // MARK: - Live Discrepancy Detection (Missing Objects & New Objects)
     
     private func evaluateLiveDiscrepancies(frame: ARFrame, camPosAR: SIMD3<Float>, yaw: Float, offset: SIMD3<Float>) {
-        guard #available(iOS 14.0, *),
-              let depthBuf = (frame.smoothedSceneDepth ?? frame.sceneDepth)?.depthMap else { return }
-        
-        CVPixelBufferLockBaseAddress(depthBuf, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(depthBuf, .readOnly) }
-        let dW = CVPixelBufferGetWidth(depthBuf)
-        let dH = CVPixelBufferGetHeight(depthBuf)
-        guard dW > 16, dH > 16, let dBase = CVPixelBufferGetBaseAddress(depthBuf) else { return }
-        let dFloats = dBase.assumingMemoryBound(to: Float32.self)
-        
         let imgRes = frame.camera.imageResolution
         guard imgRes.width > 0 && imgRes.height > 0 else { return }
-        let scaleX = Float(dW) / Float(imgRes.width)
-        let scaleY = Float(dH) / Float(imgRes.height)
         let K = frame.camera.intrinsics
-        let fx = K.columns.0.x * scaleX
-        let fy = K.columns.1.y * scaleY
-        let cx = K.columns.2.x * scaleX
-        let cy = K.columns.2.y * scaleY
-        guard fx > 1 && fy > 1 else { return }
+        guard K.columns.0.x > 1 && K.columns.1.y > 1 else { return }
+        
+        var depthBuf: CVPixelBuffer? = nil
+        var dW = 0
+        var dH = 0
+        var dFloats: UnsafeMutablePointer<Float32>? = nil
+        var dfx: Float = 0, dfy: Float = 0, dcx: Float = 0, dcy: Float = 0
+        
+        if #available(iOS 14.0, *),
+           let buf = (frame.smoothedSceneDepth ?? frame.sceneDepth)?.depthMap {
+            CVPixelBufferLockBaseAddress(buf, .readOnly)
+            let w = CVPixelBufferGetWidth(buf)
+            let h = CVPixelBufferGetHeight(buf)
+            if w > 16, h > 16, let base = CVPixelBufferGetBaseAddress(buf) {
+                depthBuf = buf
+                dW = w
+                dH = h
+                dFloats = base.assumingMemoryBound(to: Float32.self)
+                let scaleX = Float(w) / Float(imgRes.width)
+                let scaleY = Float(h) / Float(imgRes.height)
+                dfx = K.columns.0.x * scaleX
+                dfy = K.columns.1.y * scaleY
+                dcx = K.columns.2.x * scaleX
+                dcy = K.columns.2.y * scaleY
+            } else {
+                CVPixelBufferUnlockBaseAddress(buf, .readOnly)
+            }
+        }
+        defer {
+            if let buf = depthBuf {
+                CVPixelBufferUnlockBaseAddress(buf, .readOnly)
+            }
+        }
+        
+        let rawPts = (depthBuf == nil) ? (frame.rawFeaturePoints?.points ?? []) : []
         
         let camT = frame.camera.transform
         let invCamT = simd_inverse(camT)
@@ -1311,33 +1667,63 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             }
             if wallBlocked { continue }
             
-            // Project center into camera frame & check depth
+            // Project center into camera frame & check depth (LiDAR depth map or sparse feature fallback)
             let localPt = simd_mul(invCamT, SIMD4<Float>(objCenterAR, 1.0))
             let expectedDepth: Float = -localPt.z
             guard expectedDepth >= 0.85 else { continue }
-            guard abs(localPt.x / expectedDepth) < 0.30 && abs(localPt.y / expectedDepth) < 0.25 else { continue }
-            
-            let uCenter = Int(cx + fx * (localPt.x / expectedDepth))
-            let vCenter = Int(cy - fy * (localPt.y / expectedDepth))
-            guard uCenter >= 6 && uCenter < dW - 6 && vCenter >= 6 && vCenter < dH - 6 else { continue }
+            let normCenterX = localPt.x / expectedDepth
+            let normCenterY = localPt.y / expectedDepth
+            guard abs(normCenterX) < 0.30 && abs(normCenterY) < 0.25 else { continue }
             
             let objHalfExtent: Float = max(rf.halfW, rf.halfD)
             let seeThroughThresh: Float = expectedDepth + objHalfExtent + 0.35
             let hitObjThresh: Float = objHalfExtent + 0.25
-            let offsets: [(Int, Int)] = [(0, 0), (-5, 0), (5, 0), (0, -4), (0, 4)]
             var seeThroughCount = 0
             var hitObjectCount = 0
-            for (du, dv) in offsets {
-                let dMeas: Float = dFloats[(vCenter + dv) * dW + (uCenter + du)]
-                guard dMeas.isFinite && dMeas > 0.3 else { continue }
-                if dMeas > seeThroughThresh {
-                    seeThroughCount += 1
-                } else if abs(dMeas - expectedDepth) <= hitObjThresh {
-                    hitObjectCount += 1
+            var requiredSeeThrough = 4
+            
+            if let dPtr = dFloats {
+                let uCenter = Int(dcx + dfx * normCenterX)
+                let vCenter = Int(dcy - dfy * normCenterY)
+                guard uCenter >= 6 && uCenter < dW - 6 && vCenter >= 6 && vCenter < dH - 6 else { continue }
+                
+                let offsets: [(Int, Int)] = [(0, 0), (-5, 0), (5, 0), (0, -4), (0, 4)]
+                for (du, dv) in offsets {
+                    let dMeas: Float = dPtr[(vCenter + dv) * dW + (uCenter + du)]
+                    guard dMeas.isFinite && dMeas > 0.3 else { continue }
+                    if dMeas > seeThroughThresh {
+                        seeThroughCount += 1
+                    } else if abs(dMeas - expectedDepth) <= hitObjThresh {
+                        hitObjectCount += 1
+                    }
+                }
+            } else {
+                requiredSeeThrough = 3
+                // Check elevated horizontal ARKit planes matching this object first
+                for hp in horizontalPlaneAnchors.values {
+                    let hpPos = SIMD3<Float>(hp.transform.columns.3.x, hp.transform.columns.3.y, hp.transform.columns.3.z)
+                    let hAbove = hpPos.y - estimatedFloorY
+                    guard hAbove >= 0.25 && hAbove <= 1.35 else { continue }
+                    if hypot(hpPos.x - objCenterAR.x, hpPos.z - objCenterAR.z) <= objHalfExtent + 0.35 {
+                        hitObjectCount += 2
+                        break
+                    }
+                }
+                for pt in rawPts {
+                    let lp = simd_mul(invCamT, SIMD4<Float>(pt, 1.0))
+                    let zMeas = -lp.z
+                    guard zMeas >= 0.35 && zMeas <= 9.0 else { continue }
+                    if abs(lp.x / zMeas - normCenterX) < 0.14 && abs(lp.y / zMeas - normCenterY) < 0.14 {
+                        if zMeas > seeThroughThresh {
+                            seeThroughCount += 1
+                        } else if abs(zMeas - expectedDepth) <= hitObjThresh {
+                            hitObjectCount += 1
+                        }
+                    }
                 }
             }
             
-            if seeThroughCount >= 4 && hitObjectCount == 0 {
+            if seeThroughCount >= requiredSeeThrough && hitObjectCount == 0 {
                 let count = (missingStrikes[obj.id] ?? 0) + 1
                 missingStrikes[obj.id] = count
                 if count >= 4 {
@@ -1359,8 +1745,24 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             }
         }
         
-        // B. Check for NEW unexpected interior objects (from elevated planes, mesh furniture, or depth)
+        // B. Check for NEW unexpected interior objects (from elevated planes, mesh furniture, or feature/depth obstacles)
         var newCandidates: [(posAR: SIMD3<Float>, name: String, cat: ObjectCategory, dims: SIMD3<Float>)] = []
+        for hp in horizontalPlaneAnchors.values {
+            let hpPos = SIMD3<Float>(hp.transform.columns.3.x, hp.transform.columns.3.y, hp.transform.columns.3.z)
+            let hAbove = hpPos.y - estimatedFloorY
+            guard hAbove >= 0.25 && hAbove <= 1.35 else { continue }
+            let w: Float
+            let d: Float
+            if #available(iOS 16.0, *) {
+                w = hp.planeExtent.width
+                d = hp.planeExtent.height
+            } else {
+                w = hp.extent.x
+                d = hp.extent.z
+            }
+            guard max(w, d) >= 0.35 && simd_distance(camPosAR, hpPos) <= 3.8 else { continue }
+            newCandidates.append((hpPos, "Table / Surface", .table, SIMD3<Float>(w, hAbove, d)))
+        }
         for ext in meshExtracts.values {
             for lm in ext.landmarks {
                 if case let .furniture(label, cat, w, d, h) = lm.kind {
@@ -1450,6 +1852,22 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 if d > 0.25 && d < 12.0 && !d.isNaN { return d }
             }
         }
+        if let pts = frame.rawFeaturePoints?.points, !pts.isEmpty {
+            let invCam = simd_inverse(frame.camera.transform)
+            var centerDepths: [Float] = []
+            for p in pts {
+                let lp = simd_mul(invCam, SIMD4<Float>(p, 1.0))
+                let d = -lp.z
+                guard d > 0.30 && d < 10.0 else { continue }
+                if abs(lp.x / d) < 0.09 && abs(lp.y / d) < 0.09 {
+                    centerDepths.append(d)
+                }
+            }
+            if centerDepths.count >= 2 {
+                centerDepths.sort()
+                return centerDepths[centerDepths.count / 2]
+            }
+        }
         return nil
     }
     
@@ -1522,7 +1940,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 self.trackingStatusText = "Tracking Unavailable"
             case .limited(let reason):
                 switch reason {
-                case .initializing: self.trackingStatusText = "Initializing LiDAR..."
+                case .initializing:
+                    self.trackingStatusText = LiDARDetector.isLiDARSupported ? "Initializing LiDAR..." : "Initializing AR Camera..."
                 case .excessiveMotion: self.trackingStatusText = "Slow Down Device Motion"
                 case .insufficientFeatures: self.trackingStatusText = "Point at walls, furniture or windows"
                 case .relocalizing: self.trackingStatusText = "Relocalizing..."
