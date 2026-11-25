@@ -29,6 +29,22 @@ public class PlanImporter {
             return try importSVG(from: url, name: planName)
         case "json":
             return try importJSON(from: url, name: planName)
+        case "ifc":
+            let room = try IFCImporter.importIFC(from: url, roomName: planName)
+            let lines = room.walls.map { wall -> PlanLine in
+                let s = wall.startPoint2D
+                let e = wall.endPoint2D
+                return PlanLine(startX: Float(s.x), startZ: Float(s.y), endX: Float(e.x), endZ: Float(e.y))
+            }
+            let b = room.boundingBox
+            return ImportedPlan(
+                name: room.name,
+                fileType: .dxf,
+                originalWidthMeters: max(b.max.x - b.min.x, 6.0),
+                originalDepthMeters: max(b.max.z - b.min.z, 6.0),
+                renderedImageData: nil,
+                vectorLines: lines
+            )
         default:
             // Fallback: Attempt image load or raw import
             if let imagePlan = try? importRasterImage(from: url, name: planName) {
