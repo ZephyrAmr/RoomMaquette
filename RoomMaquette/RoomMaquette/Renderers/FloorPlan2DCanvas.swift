@@ -55,7 +55,6 @@ public struct FloorPlan2DCanvas: View {
     public var userPosition: SIMD3<Float>? = nil
     public var userHeading: Float? = nil
     public var userPositionIsInPlanSpace: Bool = false
-    public var userHintPosition: SIMD2<Float>? = nil
     public var isInteractiveEditing: Bool = true
     public var layerSettings: FloorPlanLayerSettings = .all
     public var isDrawingWall: Bool = false
@@ -86,7 +85,6 @@ public struct FloorPlan2DCanvas: View {
         userPosition: SIMD3<Float>? = nil,
         userHeading: Float? = nil,
         userPositionIsInPlanSpace: Bool = false,
-        userHintPosition: SIMD2<Float>? = nil,
         isInteractiveEditing: Bool = true,
         layerSettings: FloorPlanLayerSettings = .all,
         isDrawingWall: Bool = false,
@@ -105,7 +103,6 @@ public struct FloorPlan2DCanvas: View {
         self.userPosition = userPosition
         self.userHeading = userHeading
         self.userPositionIsInPlanSpace = userPositionIsInPlanSpace
-        self.userHintPosition = userHintPosition
         self.isInteractiveEditing = isInteractiveEditing
         self.layerSettings = layerSettings
         self.isDrawingWall = isDrawingWall
@@ -266,27 +263,6 @@ public struct FloorPlan2DCanvas: View {
                         let inner = Path(ellipseIn: CGRect(x: cPt.x - 5, y: cPt.y - 5, width: 10, height: 10))
                         context.fill(outer, with: .color(Color.orange.opacity(0.28)))
                         context.fill(inner, with: .color(Color.orange))
-                        context.stroke(inner, with: .color(Color.white), lineWidth: 1.5)
-                    }
-                    
-                    // 3b. Manual Region Hint Marker (Locate Me Minimap Hint)
-                    if let hint = userHintPosition {
-                        let mappedHint: SIMD2<Float>
-                        if displayMode == .importedBlueprint, let plan = importedPlan, !userPositionIsInPlanSpace {
-                            let mp = plan.alignment.mapScanToPlan(point: SIMD3<Float>(hint.x, 0, hint.y))
-                            mappedHint = SIMD2<Float>(mp.x, mp.z)
-                        } else if displayMode != .importedBlueprint, let plan = importedPlan, userPositionIsInPlanSpace {
-                            let mp = plan.alignment.mapPlanToScan(point: SIMD3<Float>(hint.x, 0, hint.y))
-                            mappedHint = SIMD2<Float>(mp.x, mp.z)
-                        } else {
-                            mappedHint = hint
-                        }
-                        let cPt = toCanvasPoint(mappedHint.x, mappedHint.y)
-                        let outer = Path(ellipseIn: CGRect(x: cPt.x - 16, y: cPt.y - 16, width: 32, height: 32))
-                        let inner = Path(ellipseIn: CGRect(x: cPt.x - 6, y: cPt.y - 6, width: 12, height: 12))
-                        context.fill(outer, with: .color(Color.purple.opacity(0.20)))
-                        context.stroke(outer, with: .color(Color.purple.opacity(0.75)), lineWidth: 1.5)
-                        context.fill(inner, with: .color(Color.purple))
                         context.stroke(inner, with: .color(Color.white), lineWidth: 1.5)
                     }
                     
@@ -532,18 +508,6 @@ public struct FloorPlan2DCanvas: View {
             } else {
                 drawWallStartPt = snapped
             }
-            return
-        }
-        
-        if !isInteractiveEditing, let tapCb = onTapPlanCoordinate {
-            let targetPt: SIMD3<Float>
-            if displayMode == .importedBlueprint, let plan = importedPlan, !userPositionIsInPlanSpace {
-                targetPt = plan.alignment.mapPlanToScan(point: roomPt)
-            } else {
-                targetPt = roomPt
-            }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            tapCb(targetPt)
             return
         }
         

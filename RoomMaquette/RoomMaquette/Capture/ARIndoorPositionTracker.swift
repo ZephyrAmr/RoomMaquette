@@ -52,7 +52,6 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     @Published public var observedWallCount: Int = 0
     @Published public var observedLandmarkCount: Int = 0
     @Published public var activeDiscrepancy: RoomDiscrepancy? = nil
-    @Published public var userHintPosition: SIMD2<Float>? = nil
     @Published public var lockedPlanScale: Float = 1.0
     
     public var session: ARSession
@@ -216,7 +215,6 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.observedWallCount = 0
         self.observedLandmarkCount = 0
         self.activeDiscrepancy = nil
-        self.userHintPosition = nil
         self.lastRefineTime = 0
         
         self.floorCalibrated = false
@@ -292,25 +290,6 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         self.newObjectStrikes.removeAll()
         self.trackingStatusText = "Relocalizing... Pan across walls, furniture & windows"
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-    }
-    
-    public func setRegionHint(_ planPoint: SIMD2<Float>) {
-        self.userHintPosition = planPoint
-        self.consistentCandidateCount = 0
-        self.lastBestCandidate = nil
-        if self.isAutoLocalized {
-            self.isAutoLocalized = false
-            self.isCalibrated = false
-            self.currentPosition = nil
-            self.currentHeading = nil
-        }
-        self.trackingStatusText = "Hint pinned — look at nearby walls & doors to lock"
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-    
-    public func clearRegionHint() {
-        self.userHintPosition = nil
-        self.consistentCandidateCount = 0
     }
     
     // MARK: - ARSessionDelegate
@@ -898,7 +877,6 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         let portals = referencePortals
         let furniture = referenceFurniture
         let corners = referenceCorners
-        let hintPos = userHintPosition
         let minB = refMinBounds
         let maxB = refMaxBounds
         let curFloorY = estimatedFloorY
@@ -1086,6 +1064,11 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             }
             
             let totalWallWeight = max(obsWalls.reduce(Float(0)) { $0 + $1.weight }, 1.0)
+            let compassRays8: [SIMD2<Float>] = (0..<8).map {
+                let a = Float($0) * (.pi * 0.25)
+                return SIMD2<Float>(cos(a), sin(a))
+            }
+            let maxSpan = max(hypot(maxB.x - minB.x, maxB.y - minB.y), 12.0)
             
             func evaluateHypothesis(yaw: Float, tr: SIMD2<Float>, s: Float) -> PoseHyp {
                 let cosY = cos(yaw)
@@ -1204,13 +1187,22 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                     }
                 }
                 
-                // v. Optional 1-Tap User Region Hint on Minimap
-                if let hint = hintPos {
-                    let hd = simd_distance(camW, hint)
-                    if hd <= 4.5 {
-                        score += 3.2 * exp(-(hd * hd) / 9.0)
-                    } else if hd > 6.5 {
-                        score -= 2.5
+                // v. Automatic 360-degree indoor enclosure check (rejects exterior L/U courtyard voids)
+                if targets.count >= 4 {
+                    var enclosedRays = 0
+                    for dir in compassRays8 {
+                        for ref in targets {
+                            if let d = Self.raySegmentIntersection(origin: camW, dir: dir, a: ref.start, b: ref.end),
+                               d > 0.10 && d < maxSpan {
+                                enclosedRays += 1
+                                break
+                            }
+                        }
+                    }
+                    if enclosedRays < 5 {
+                        score -= Float(5 - enclosedRays) * 1.45
+                    } else if enclosedRays >= 7 {
+                        score += 0.65
                     }
                 }
                 
@@ -1381,7 +1373,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             let margin = secondBest.map { best.score - $0.score } ?? 10.0
             
             // STRICT CERTAINTY + UNIQUENESS GATE
-            let hasSymmetryBreaker = (best.semanticMatches >= 1 && margin >= 1.1) || (margin >= 2.2) || (secondBest == nil) || (hintPos != nil && margin >= 1.2)
+            let hasSymmetryBreaker = (best.semanticMatches >= 1 && margin >= 1.1) || (margin >= 2.2) || (secondBest == nil)
             let isConfident = hasCorner && best.wallInlierRatio >= 0.60 && hasSymmetryBreaker
             
             if isConfident {
@@ -1432,7 +1424,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                     if !hasCorner {
                         self.trackingStatusText = "1 wall seen — pan to a corner, furniture, or window"
                     } else if !hasSymmetryBreaker {
-                        self.trackingStatusText = "Ambiguous corner — look at a doorway/window or tap minimap"
+                        self.trackingStatusText = "Ambiguous corner — look at a window, door, or furniture"
                     } else {
                         self.trackingStatusText = "Scanning room (\(Int(best.wallInlierRatio * 100))%)..."
                     }

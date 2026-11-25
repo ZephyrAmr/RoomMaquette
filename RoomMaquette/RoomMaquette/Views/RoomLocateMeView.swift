@@ -303,29 +303,16 @@ public struct RoomLocateMeView: View {
                     userPosition: tracker.currentPosition,
                     userHeading: tracker.currentHeading,
                     userPositionIsInPlanSpace: tracker.isLocatingOnImportedPlan,
-                    userHintPosition: tracker.userHintPosition,
-                    isInteractiveEditing: false,
-                    onTapPlanCoordinate: { pt in
-                        tracker.setRegionHint(SIMD2<Float>(pt.x, pt.z))
-                    }
+                    isInteractiveEditing: false
                 )
                 
                 if !tracker.isAutoLocalized {
                     HStack(spacing: 6) {
                         ProgressView()
                             .scaleEffect(0.7)
-                        Text(tracker.userHintPosition == nil
-                             ? "Dot hidden until locked • Tap minimap to hint room"
-                             : "Room hint set • Locating nearby...")
+                        Text("Dot hidden until position is confirmed")
                             .font(.system(size: 10.5, weight: .semibold))
                             .foregroundColor(.primary)
-                        if tracker.userHintPosition != nil {
-                            Button("Clear") {
-                                tracker.clearRegionHint()
-                            }
-                            .font(.system(size: 10.5, weight: .bold))
-                            .foregroundColor(.purple)
-                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
