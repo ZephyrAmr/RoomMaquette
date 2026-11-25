@@ -1,6 +1,33 @@
 import SwiftUI
 import simd
 
+public struct FloorPlanLayerSettings: Equatable {
+    public var showWalls: Bool = true
+    public var showDoors: Bool = true
+    public var showWindows: Bool = true
+    public var showOpenings: Bool = true
+    public var showFurniture: Bool = true
+    public var showBlueprint: Bool = true
+    
+    public init(
+        showWalls: Bool = true,
+        showDoors: Bool = true,
+        showWindows: Bool = true,
+        showOpenings: Bool = true,
+        showFurniture: Bool = true,
+        showBlueprint: Bool = true
+    ) {
+        self.showWalls = showWalls
+        self.showDoors = showDoors
+        self.showWindows = showWindows
+        self.showOpenings = showOpenings
+        self.showFurniture = showFurniture
+        self.showBlueprint = showBlueprint
+    }
+    
+    public static let all = FloorPlanLayerSettings()
+}
+
 public enum FloorPlanDisplayMode: String, CaseIterable, Identifiable {
     case scannedPlan = "Scanned 2D"
     case importedBlueprint = "Blueprint"
@@ -29,15 +56,23 @@ public struct FloorPlan2DCanvas: View {
     public var userHeading: Float? = nil
     public var userPositionIsInPlanSpace: Bool = false
     public var isInteractiveEditing: Bool = true
+    public var layerSettings: FloorPlanLayerSettings = .all
+    public var isDrawingWall: Bool = false
     
     public var onSelectObject: ((UUID?) -> Void)? = nil
     public var onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil
+    public var onDrawWall: ((SIMD2<Float>, SIMD2<Float>) -> Void)? = nil
     public var onTapPlanCoordinate: ((SIMD3<Float>) -> Void)? = nil
     
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastScale: CGFloat = 1.0
     @State private var lastOffset: CGSize = .zero
+    
+    @State private var draggingObjectId: UUID? = nil
+    @State private var dragStartItemPos: SIMD3<Float>? = nil
+    @State private var isPanningCanvas: Bool = false
+    @State private var drawWallStartPt: SIMD2<Float>? = nil
     
     public init(
         room: MaquetteRoom,
@@ -51,8 +86,11 @@ public struct FloorPlan2DCanvas: View {
         userHeading: Float? = nil,
         userPositionIsInPlanSpace: Bool = false,
         isInteractiveEditing: Bool = true,
+        layerSettings: FloorPlanLayerSettings = .all,
+        isDrawingWall: Bool = false,
         onSelectObject: ((UUID?) -> Void)? = nil,
         onMoveObject: ((UUID, SIMD3<Float>) -> Void)? = nil,
+        onDrawWall: ((SIMD2<Float>, SIMD2<Float>) -> Void)? = nil,
         onTapPlanCoordinate: ((SIMD3<Float>) -> Void)? = nil
     ) {
         self.room = room
@@ -66,8 +104,11 @@ public struct FloorPlan2DCanvas: View {
         self.userHeading = userHeading
         self.userPositionIsInPlanSpace = userPositionIsInPlanSpace
         self.isInteractiveEditing = isInteractiveEditing
+        self.layerSettings = layerSettings
+        self.isDrawingWall = isDrawingWall
         self.onSelectObject = onSelectObject
         self.onMoveObject = onMoveObject
+        self.onDrawWall = onDrawWall
         self.onTapPlanCoordinate = onTapPlanCoordinate
     }
     
@@ -97,7 +138,8 @@ public struct FloorPlan2DCanvas: View {
                     .ignoresSafeArea()
                 
                 // Optional Raster Blueprint Image Underlay
-                if (displayMode == .importedBlueprint || displayMode == .compositeOverlay),
+                if layerSettings.showBlueprint,
+                   (displayMode == .importedBlueprint || displayMode == .compositeOverlay),
                    let plan = importedPlan,
                    let data = plan.renderedImageData,
                    let uiImage = UIImage(data: data) {
@@ -136,7 +178,8 @@ public struct FloorPlan2DCanvas: View {
                     }
                     
                     // 2. Draw Vector CAD Blueprint Lines if present
-                    if (displayMode == .importedBlueprint || displayMode == .compositeOverlay),
+                    if layerSettings.showBlueprint,
+                       (displayMode == .importedBlueprint || displayMode == .compositeOverlay),
                        let plan = importedPlan, !plan.vectorLines.isEmpty {
                         drawBlueprintVectorLines(
                             context: &context,
@@ -153,46 +196,56 @@ public struct FloorPlan2DCanvas: View {
                         drawFloorPolygon(context: &context, bounds: bounds, toCanvas: toCanvasPoint)
                         
                         // Furniture / Objects
-                        drawFurniture(
-                            context: &context,
-                            objects: room.objects,
-                            selectedId: selectedObjectId,
-                            toCanvas: toCanvasPoint,
-                            currentScale: currentScale
-                        )
+                        if layerSettings.showFurniture {
+                            drawFurniture(
+                                context: &context,
+                                objects: room.objects,
+                                selectedId: selectedObjectId,
+                                toCanvas: toCanvasPoint,
+                                currentScale: currentScale
+                            )
+                        }
                         
-                        // Walls, Doors, Windows
-                        drawWalls(
-                            context: &context,
-                            walls: room.walls,
-                            selectedId: selectedObjectId,
-                            showDimensions: showDimensions,
-                            toCanvas: toCanvasPoint,
-                            currentScale: currentScale
-                        )
-                        drawDoors(
-                            context: &context,
-                            doors: room.doors,
-                            selectedId: selectedObjectId,
-                            showDimensions: showDimensions,
-                            toCanvas: toCanvasPoint,
-                            currentScale: currentScale
-                        )
-                        drawWindows(
-                            context: &context,
-                            windows: room.windows,
-                            selectedId: selectedObjectId,
-                            showDimensions: showDimensions,
-                            toCanvas: toCanvasPoint,
-                            currentScale: currentScale
-                        )
-                        drawOpenings(
-                            context: &context,
-                            openings: room.openings,
-                            selectedId: selectedObjectId,
-                            showDimensions: showDimensions,
-                            toCanvas: toCanvasPoint
-                        )
+                        // Walls, Doors, Windows, Openings
+                        if layerSettings.showWalls {
+                            drawWalls(
+                                context: &context,
+                                walls: room.walls,
+                                selectedId: selectedObjectId,
+                                showDimensions: showDimensions,
+                                toCanvas: toCanvasPoint,
+                                currentScale: currentScale
+                            )
+                        }
+                        if layerSettings.showDoors {
+                            drawDoors(
+                                context: &context,
+                                doors: room.doors,
+                                selectedId: selectedObjectId,
+                                showDimensions: showDimensions,
+                                toCanvas: toCanvasPoint,
+                                currentScale: currentScale
+                            )
+                        }
+                        if layerSettings.showWindows {
+                            drawWindows(
+                                context: &context,
+                                windows: room.windows,
+                                selectedId: selectedObjectId,
+                                showDimensions: showDimensions,
+                                toCanvas: toCanvasPoint,
+                                currentScale: currentScale
+                            )
+                        }
+                        if layerSettings.showOpenings {
+                            drawOpenings(
+                                context: &context,
+                                openings: room.openings,
+                                selectedId: selectedObjectId,
+                                showDimensions: showDimensions,
+                                toCanvas: toCanvasPoint
+                            )
+                        }
                         
                         // Dimension Lines
                         if showDimensions {
@@ -201,6 +254,16 @@ public struct FloorPlan2DCanvas: View {
                         
                         // Room Name & Area Badge
                         drawRoomBadge(context: &context, room: room, toCanvas: toCanvasPoint)
+                    }
+                    
+                    // Draw-Wall Start Anchor Marker
+                    if isDrawingWall, let startWallPt = drawWallStartPt {
+                        let cPt = toCanvasPoint(startWallPt.x, startWallPt.y)
+                        let outer = Path(ellipseIn: CGRect(x: cPt.x - 10, y: cPt.y - 10, width: 20, height: 20))
+                        let inner = Path(ellipseIn: CGRect(x: cPt.x - 5, y: cPt.y - 5, width: 10, height: 10))
+                        context.fill(outer, with: .color(Color.orange.opacity(0.28)))
+                        context.fill(inner, with: .color(Color.orange))
+                        context.stroke(inner, with: .color(Color.white), lineWidth: 1.5)
                     }
                     
                     // 4. Live User Location Puck (Locate Me AR Mode)
@@ -228,6 +291,9 @@ public struct FloorPlan2DCanvas: View {
                     }
                 }
                 .contentShape(Rectangle())
+                .onChange(of: isDrawingWall) { active in
+                    if !active { drawWallStartPt = nil }
+                }
                 .onTapGesture { location in
                     handleTapAt(location, viewSize: viewSize, bounds: bounds, baseScale: baseScale)
                 }
@@ -240,15 +306,42 @@ public struct FloorPlan2DCanvas: View {
                             .onEnded { _ in
                                 lastScale = scale
                             },
-                        DragGesture()
+                        DragGesture(minimumDistance: 3)
                             .onChanged { value in
-                                offset = CGSize(
-                                    width: lastOffset.width + value.translation.width,
-                                    height: lastOffset.height + value.translation.height
-                                )
+                                if !isPanningCanvas && draggingObjectId == nil {
+                                    if isInteractiveEditing && !isDrawingWall, let selId = selectedObjectId {
+                                        let startRoom = screenToRoomCoord(value.startLocation, viewSize: viewSize, bounds: bounds, baseScale: baseScale)
+                                        if isPoint(startRoom, nearElementId: selId, touchToleranceM: max(0.45, Float(34.0 / max(currentScale, 1.0)))) {
+                                            draggingObjectId = selId
+                                            dragStartItemPos = positionForElement(id: selId)
+                                        } else {
+                                            isPanningCanvas = true
+                                        }
+                                    } else {
+                                        isPanningCanvas = true
+                                    }
+                                }
+                                
+                                if let dragId = draggingObjectId, let origPos = dragStartItemPos {
+                                    let dx = Float(value.translation.width / max(currentScale, 1.0))
+                                    let dz = Float(value.translation.height / max(currentScale, 1.0))
+                                    onMoveObject?(dragId, SIMD3<Float>(origPos.x + dx, origPos.y, origPos.z + dz))
+                                } else {
+                                    offset = CGSize(
+                                        width: lastOffset.width + value.translation.width,
+                                        height: lastOffset.height + value.translation.height
+                                    )
+                                }
                             }
                             .onEnded { _ in
-                                lastOffset = offset
+                                if !isPanningCanvas && draggingObjectId != nil {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                } else {
+                                    lastOffset = offset
+                                }
+                                draggingObjectId = nil
+                                dragStartItemPos = nil
+                                isPanningCanvas = false
                             }
                     )
                 )
@@ -307,106 +400,207 @@ public struct FloorPlan2DCanvas: View {
     
     // MARK: - Tap & Hit Detection
     
+    private func screenToRoomCoord(
+        _ screenPoint: CGPoint,
+        viewSize: CGSize,
+        bounds: (min: SIMD3<Float>, max: SIMD3<Float>),
+        baseScale: CGFloat
+    ) -> SIMD3<Float> {
+        let midX = viewSize.width / 2.0 + offset.width
+        let midY = viewSize.height / 2.0 + offset.height
+        let currentScale = baseScale * scale
+        let centerX: CGFloat = (displayMode == .importedBlueprint) ? 0.0 : CGFloat(bounds.min.x + bounds.max.x) / 2.0
+        let centerZ: CGFloat = (displayMode == .importedBlueprint) ? 0.0 : CGFloat(bounds.min.z + bounds.max.z) / 2.0
+        let rx = Float((screenPoint.x - midX) / currentScale + centerX)
+        let rz = Float((screenPoint.y - midY) / currentScale + centerZ)
+        return SIMD3<Float>(rx, 0, rz)
+    }
+    
+    private func positionForElement(id: UUID) -> SIMD3<Float>? {
+        if let o = room.objects.first(where: { $0.id == id }) { return o.position }
+        if let d = room.doors.first(where: { $0.id == id }) { return d.position }
+        if let w = room.windows.first(where: { $0.id == id }) { return w.position }
+        if let op = room.openings.first(where: { $0.id == id }) { return op.position }
+        if let wall = room.walls.first(where: { $0.id == id }) { return wall.position }
+        return nil
+    }
+    
+    private func isPoint(_ roomPt: SIMD3<Float>, nearElementId id: UUID, touchToleranceM: Float) -> Bool {
+        if let obj = room.objects.first(where: { $0.id == id }) {
+            let dx = roomPt.x - obj.position.x
+            let dz = roomPt.z - obj.position.z
+            let cosA = cos(-obj.rotationY), sinA = sin(-obj.rotationY)
+            let lx = dx * cosA - dz * sinA
+            let lz = dx * sinA + dz * cosA
+            return abs(lx) <= (obj.width * 0.5 + touchToleranceM) && abs(lz) <= (obj.depth * 0.5 + touchToleranceM)
+        }
+        if let door = room.doors.first(where: { $0.id == id }) {
+            return hypot(roomPt.x - door.position.x, roomPt.z - door.position.z) <= max(door.width * 0.7, touchToleranceM)
+        }
+        if let win = room.windows.first(where: { $0.id == id }) {
+            return hypot(roomPt.x - win.position.x, roomPt.z - win.position.z) <= max(win.width * 0.7, touchToleranceM)
+        }
+        if let op = room.openings.first(where: { $0.id == id }) {
+            return hypot(roomPt.x - op.position.x, roomPt.z - op.position.z) <= max(op.width * 0.7, touchToleranceM)
+        }
+        if let wall = room.walls.first(where: { $0.id == id }) {
+            let p1 = wall.startPoint2D, p2 = wall.endPoint2D
+            let wx = Float(p2.x - p1.x), wz = Float(p2.y - p1.y)
+            let lenSq = wx * wx + wz * wz
+            guard lenSq > 1e-4 else { return false }
+            let t = max(0, min(1, ((roomPt.x - Float(p1.x)) * wx + (roomPt.z - Float(p1.y)) * wz) / lenSq))
+            let px = Float(p1.x) + t * wx, pz = Float(p1.y) + t * wz
+            return hypot(roomPt.x - px, roomPt.z - pz) <= touchToleranceM
+        }
+        return false
+    }
+    
+    private func snapWallDrawPoint(_ raw: SIMD2<Float>, relativeTo startPt: SIMD2<Float>?) -> SIMD2<Float> {
+        // 1. Snap within 0.25m to existing wall endpoints so corners close neatly
+        var bestPt = raw
+        var bestDist: Float = 0.25
+        for wall in room.walls {
+            for p in [wall.startPoint2D, wall.endPoint2D] {
+                let candidate = SIMD2<Float>(Float(p.x), Float(p.y))
+                let d = simd_distance(raw, candidate)
+                if d < bestDist {
+                    bestDist = d
+                    bestPt = candidate
+                }
+            }
+        }
+        if bestDist < 0.25 { return bestPt }
+        
+        // 2. Snap nearly horizontal / vertical lines within 6 degrees when placing end point
+        if let st = startPt {
+            let dx = raw.x - st.x
+            let dz = raw.y - st.y
+            let len = hypot(dx, dz)
+            if len > 0.25 {
+                let tan6 = tan(6.0 * Float.pi / 180.0)
+                if abs(dz) < abs(dx) * tan6 {
+                    return SIMD2<Float>(raw.x, st.y)
+                } else if abs(dx) < abs(dz) * tan6 {
+                    return SIMD2<Float>(st.x, raw.y)
+                }
+            }
+        }
+        return raw
+    }
+    
     private func handleTapAt(
         _ screenPoint: CGPoint,
         viewSize: CGSize,
         bounds: (min: SIMD3<Float>, max: SIMD3<Float>),
         baseScale: CGFloat
     ) {
-        let midX = viewSize.width / 2.0 + offset.width
-        let midY = viewSize.height / 2.0 + offset.height
-        let currentScale = baseScale * scale
-        let centerX: CGFloat = (displayMode == .importedBlueprint) ? 0.0 : CGFloat(bounds.min.x + bounds.max.x) / 2.0
-        let centerZ: CGFloat = (displayMode == .importedBlueprint) ? 0.0 : CGFloat(bounds.min.z + bounds.max.z) / 2.0
+        let roomPt = screenToRoomCoord(screenPoint, viewSize: viewSize, bounds: bounds, baseScale: baseScale)
         
-        let rx = Float((screenPoint.x - midX) / currentScale + centerX)
-        let rz = Float((screenPoint.y - midY) / currentScale + centerZ)
+        if isDrawingWall && isInteractiveEditing && displayMode != .importedBlueprint {
+            let raw = SIMD2<Float>(roomPt.x, roomPt.z)
+            let snapped = snapWallDrawPoint(raw, relativeTo: drawWallStartPt)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            if let st = drawWallStartPt {
+                if simd_distance(st, snapped) >= 0.25 {
+                    onDrawWall?(st, snapped)
+                }
+                drawWallStartPt = nil
+            } else {
+                drawWallStartPt = snapped
+            }
+            return
+        }
         
         if displayMode == .importedBlueprint, let plan = importedPlan {
-            // Touch coordinate on blueprint inverted into AR/scan room space
-            let planPt = SIMD3<Float>(rx, 0, rz)
-            let scanPt = plan.alignment.mapPlanToScan(point: planPt)
+            let scanPt = plan.alignment.mapPlanToScan(point: roomPt)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             onTapPlanCoordinate?(scanPt)
             return
         }
         
-        let roomPt = SIMD3<Float>(rx, 0, rz)
-        
-        // 1. Check furniture object hits
-        for obj in room.objects {
-            let dx = roomPt.x - obj.position.x
-            let dz = roomPt.z - obj.position.z
-            let rot = obj.rotationY
-            
-            // Un-rotate touch point to object local space
-            let cosA = cos(-rot)
-            let sinA = sin(-rot)
-            let localX = dx * cosA - dz * sinA
-            let localZ = dx * sinA + dz * cosA
-            
-            let halfW = (obj.width / 2.0) + 0.15 // padding for easy tapping
-            let halfD = (obj.depth / 2.0) + 0.15
-            
-            if abs(localX) <= halfW && abs(localZ) <= halfD {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                onSelectObject?(obj.id)
-                return
+        // 1. Check furniture object hits (only if visible)
+        if layerSettings.showFurniture {
+            for obj in room.objects {
+                let dx = roomPt.x - obj.position.x
+                let dz = roomPt.z - obj.position.z
+                let rot = obj.rotationY
+                
+                let cosA = cos(-rot)
+                let sinA = sin(-rot)
+                let localX = dx * cosA - dz * sinA
+                let localZ = dx * sinA + dz * cosA
+                
+                let halfW = (obj.width / 2.0) + 0.15
+                let halfD = (obj.depth / 2.0) + 0.15
+                
+                if abs(localX) <= halfW && abs(localZ) <= halfD {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onSelectObject?(obj.id)
+                    return
+                }
             }
         }
         
         // 2. Check door hits
-        for door in room.doors {
-            let dx = roomPt.x - door.position.x
-            let dz = roomPt.z - door.position.z
-            let dist = sqrt(dx*dx + dz*dz)
-            if dist <= max(door.width * 0.7, 0.45) {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                onSelectObject?(door.id)
-                return
+        if layerSettings.showDoors {
+            for door in room.doors {
+                let dx = roomPt.x - door.position.x
+                let dz = roomPt.z - door.position.z
+                let dist = sqrt(dx*dx + dz*dz)
+                if dist <= max(door.width * 0.7, 0.45) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onSelectObject?(door.id)
+                    return
+                }
             }
         }
         
         // 3. Check window hits
-        for win in room.windows {
-            let dx = roomPt.x - win.position.x
-            let dz = roomPt.z - win.position.z
-            let dist = sqrt(dx*dx + dz*dz)
-            if dist <= max(win.width * 0.7, 0.45) {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                onSelectObject?(win.id)
-                return
+        if layerSettings.showWindows {
+            for win in room.windows {
+                let dx = roomPt.x - win.position.x
+                let dz = roomPt.z - win.position.z
+                let dist = sqrt(dx*dx + dz*dz)
+                if dist <= max(win.width * 0.7, 0.45) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onSelectObject?(win.id)
+                    return
+                }
             }
         }
         
         // 3b. Check opening hits
-        for op in room.openings {
-            let dx = roomPt.x - op.position.x
-            let dz = roomPt.z - op.position.z
-            let dist = sqrt(dx*dx + dz*dz)
-            if dist <= max(op.width * 0.7, 0.45) {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                onSelectObject?(op.id)
-                return
+        if layerSettings.showOpenings {
+            for op in room.openings {
+                let dx = roomPt.x - op.position.x
+                let dz = roomPt.z - op.position.z
+                let dist = sqrt(dx*dx + dz*dz)
+                if dist <= max(op.width * 0.7, 0.45) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onSelectObject?(op.id)
+                    return
+                }
             }
         }
         
         // 4. Check wall hits (perpendicular distance to wall segment)
-        for wall in room.walls {
-            let p1 = wall.startPoint2D
-            let p2 = wall.endPoint2D
-            let wx = Float(p2.x - p1.x)
-            let wz = Float(p2.y - p1.y)
-            let lenSq = wx*wx + wz*wz
-            if lenSq > 0.0001 {
-                let t = max(0, min(1, ((roomPt.x - Float(p1.x)) * wx + (roomPt.z - Float(p1.y)) * wz) / lenSq))
-                let projX = Float(p1.x) + t * wx
-                let projZ = Float(p1.y) + t * wz
-                let dist = sqrt((roomPt.x - projX)*(roomPt.x - projX) + (roomPt.z - projZ)*(roomPt.z - projZ))
-                if dist <= 0.35 {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    onSelectObject?(wall.id)
-                    return
+        if layerSettings.showWalls {
+            for wall in room.walls {
+                let p1 = wall.startPoint2D
+                let p2 = wall.endPoint2D
+                let wx = Float(p2.x - p1.x)
+                let wz = Float(p2.y - p1.y)
+                let lenSq = wx*wx + wz*wz
+                if lenSq > 0.0001 {
+                    let t = max(0, min(1, ((roomPt.x - Float(p1.x)) * wx + (roomPt.z - Float(p1.y)) * wz) / lenSq))
+                    let projX = Float(p1.x) + t * wx
+                    let projZ = Float(p1.y) + t * wz
+                    let dist = sqrt((roomPt.x - projX)*(roomPt.x - projX) + (roomPt.z - projZ)*(roomPt.z - projZ))
+                    if dist <= 0.35 {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        onSelectObject?(wall.id)
+                        return
+                    }
                 }
             }
         }

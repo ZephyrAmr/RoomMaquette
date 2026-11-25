@@ -4,6 +4,7 @@ import simd
 public enum ElementCategoryTab: String, CaseIterable, Identifiable {
     case doors = "Doors"
     case windows = "Windows"
+    case walls = "Walls"
     case furniture = "Furniture"
     
     public var id: String { rawValue }
@@ -12,9 +13,19 @@ public enum ElementCategoryTab: String, CaseIterable, Identifiable {
         switch self {
         case .doors: return "door.left.hand.open"
         case .windows: return "window.vertical.closed"
+        case .walls: return "square.split.diagonal.2x2"
         case .furniture: return "sofa.fill"
         }
     }
+}
+
+public struct WallTemplate: Identifiable {
+    public var id = UUID()
+    public var name: String
+    public var length: Float
+    public var height: Float
+    public var thickness: Float
+    public var description: String
 }
 
 public struct DoorTemplate: Identifiable {
@@ -41,10 +52,21 @@ public struct AddArchitecturalElementSheet: View {
     
     public var onAddDoor: ((Float, Float, Bool) -> Void)?
     public var onAddWindow: ((Float, Float) -> Void)?
+    public var onAddWall: ((Float, Float, Float) -> Void)?
     public var onAddFurniture: ((FurnitureTemplate) -> Void)?
     
     @State private var selectedTab: ElementCategoryTab = .doors
     @State private var searchText = ""
+    @State private var customWallLength: Float = 2.50
+    @State private var customWallThickness: Float = 0.15
+    @State private var customWallHeight: Float = 2.60
+    
+    public static let standardWalls: [WallTemplate] = [
+        WallTemplate(name: "Short Partition Wall (1.0m)", length: 1.00, height: 2.60, thickness: 0.12, description: "1.00m × 2.60m • 12cm interior partition"),
+        WallTemplate(name: "Medium Room Wall (2.5m)", length: 2.50, height: 2.60, thickness: 0.15, description: "2.50m × 2.60m • 15cm standard wall"),
+        WallTemplate(name: "Full Span Wall (4.0m)", length: 4.00, height: 2.60, thickness: 0.15, description: "4.00m × 2.60m • 15cm main structural wall"),
+        WallTemplate(name: "Thick Exterior Wall (3.0m)", length: 3.00, height: 2.70, thickness: 0.25, description: "3.00m × 2.70m • 25cm insulated outer wall")
+    ]
     
     public static let standardDoors: [DoorTemplate] = [
         DoorTemplate(name: "Standard Interior Door", width: 0.80, height: 2.10, icon: "door.left.hand.open", description: "0.80m × 2.10m • Standard residential interior door", isOpen: true),
@@ -64,10 +86,12 @@ public struct AddArchitecturalElementSheet: View {
     public init(
         onAddDoor: ((Float, Float, Bool) -> Void)? = nil,
         onAddWindow: ((Float, Float) -> Void)? = nil,
+        onAddWall: ((Float, Float, Float) -> Void)? = nil,
         onAddFurniture: ((FurnitureTemplate) -> Void)? = nil
     ) {
         self.onAddDoor = onAddDoor
         self.onAddWindow = onAddWindow
+        self.onAddWall = onAddWall
         self.onAddFurniture = onAddFurniture
     }
     
@@ -92,6 +116,8 @@ public struct AddArchitecturalElementSheet: View {
                             doorsSection
                         case .windows:
                             windowsSection
+                        case .walls:
+                            wallsSection
                         case .furniture:
                             furnitureSection
                         }
@@ -199,6 +225,107 @@ public struct AddArchitecturalElementSheet: View {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 20))
                             .foregroundColor(.cyan)
+                    }
+                    .padding(12)
+                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+    
+    // MARK: - Walls Section
+    
+    private var wallsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("CUSTOM WALL")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.secondary)
+            
+            VStack(spacing: 10) {
+                HStack {
+                    Text("Length")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(String(format: "%.2f m", customWallLength))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                }
+                Slider(value: $customWallLength, in: 0.5...8.0, step: 0.05)
+                
+                HStack {
+                    Text("Thickness")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(String(format: "%.2f m", customWallThickness))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                }
+                Slider(value: $customWallThickness, in: 0.08...0.40, step: 0.01)
+                
+                HStack {
+                    Text("Height")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(String(format: "%.2f m", customWallHeight))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                }
+                Slider(value: $customWallHeight, in: 1.8...4.0, step: 0.05)
+                
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onAddWall?(customWallLength, customWallHeight, customWallThickness)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Add Custom Wall")
+                            .fontWeight(.bold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 10))
+                    .foregroundColor(.white)
+                }
+            }
+            .padding(14)
+            .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            
+            Text("WALL PRESETS")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
+            
+            ForEach(Self.standardWalls) { wall in
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onAddWall?(wall.length, wall.height, wall.thickness)
+                    dismiss()
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.primary.opacity(0.08))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "square.split.diagonal.2x2")
+                                .font(.system(size: 22))
+                                .foregroundColor(.primary)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(wall.name)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                            Text(wall.description)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.blue)
                     }
                     .padding(12)
                     .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
