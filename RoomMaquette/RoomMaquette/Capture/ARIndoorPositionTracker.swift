@@ -15,6 +15,7 @@ public struct ReferenceWallTarget: Identifiable {
     public var offset: Float
     public var angle: Float
     public var thickness: Float
+    public var interiorNormalSide: Float // +1 = +normal faces indoors, -1 = -normal faces indoors, 0 = both sides (interior wall)
     public var displayName: String
     
     public var length: Float {
@@ -118,11 +119,59 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     private var effectiveScale: Float = 1.0
     private let transformLock = NSLock()
     
+    private struct IndoorOccupancyGrid {
+        var minX: Float
+        var minZ: Float
+        var maxX: Float
+        var maxZ: Float
+        var cellSize: Float
+        var cols: Int
+        var rows: Int
+        var cells: [UInt8] // 0 = indoors, 1 = wall/portal barrier, 2 = outdoors
+        var hasEnclosedInterior: Bool
+        
+        func isOutdoor(_ pt: SIMD2<Float>) -> Bool {
+            if !hasEnclosedInterior {
+                return pt.x < minX || pt.x > maxX || pt.y < minZ || pt.y > maxZ
+            }
+            let c = Int(floor((pt.x - minX) / cellSize))
+            let r = Int(floor((pt.y - minZ) / cellSize))
+            guard c >= 0 && c < cols && r >= 0 && r < rows else { return true }
+            return cells[r * cols + c] == 2
+        }
+        
+        func isStrictlyIndoors(_ pt: SIMD2<Float>) -> Bool {
+            if !hasEnclosedInterior {
+                return pt.x >= minX && pt.x <= maxX && pt.y >= minZ && pt.y <= maxZ
+            }
+            let c = Int(floor((pt.x - minX) / cellSize))
+            let r = Int(floor((pt.y - minZ) / cellSize))
+            guard c >= 0 && c < cols && r >= 0 && r < rows else { return false }
+            let val = cells[r * cols + c]
+            if val == 0 { return true }
+            if val == 2 { return false }
+            // Wall barrier cell (1): allow only if directly touching an enclosed indoor cell (0)
+            for dr in -1...1 {
+                for dc in -1...1 {
+                    let nr = r + dr
+                    let nc = c + dc
+                    if nr >= 0 && nr < rows && nc >= 0 && nc < cols {
+                        if cells[nr * cols + nc] == 0 {
+                            return true
+                        }
+                    }
+                }
+            }
+            return false
+        }
+    }
+    
     // Reference Geometry built from MaquetteRoom
     private var referenceTargets: [ReferenceWallTarget] = []
     private var referencePortals: [RefPortal] = []
     private var referenceFurniture: [RefFurniture] = []
     private var referenceCorners: [SIMD2<Float>] = []
+    private var indoorGrid: IndoorOccupancyGrid? = nil
     private var refMinBounds = SIMD2<Float>(-5, -5)
     private var refMaxBounds = SIMD2<Float>(5, 5)
     private var roomFloorY: Float = 0.0
@@ -193,6 +242,8 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             self.referenceTargets = []
             self.referencePortals = []
             self.referenceFurniture = []
+            self.referenceCorners = []
+            self.indoorGrid = nil
         }
         
         transformLock.lock()
@@ -660,10 +711,11 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         }
         self.referenceFurniture = furn
         
-        // Bounding Envelope
+        // Bounding Envelope & Strict Indoor Perimeter Grid
         if targets.isEmpty {
             refMinBounds = SIMD2<Float>(-5, -5)
             refMaxBounds = SIMD2<Float>(5, 5)
+            self.indoorGrid = nil
         } else {
             var minX: Float = .greatestFiniteMagnitude, maxX: Float = -.greatestFiniteMagnitude
             var minZ: Float = .greatestFiniteMagnitude, maxZ: Float = -.greatestFiniteMagnitude
@@ -675,7 +727,179 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             }
             refMinBounds = SIMD2<Float>(minX, minZ)
             refMaxBounds = SIMD2<Float>(maxX, maxZ)
+            
+            let grid = Self.buildIndoorOccupancyGrid(targets: targets, portals: portals, minB: refMinBounds, maxB: refMaxBounds)
+            self.indoorGrid = grid
+            
+            // Determine which side(s) of each wall are indoors vs outdoors
+            if grid.hasEnclosedInterior {
+                for i in 0..<targets.count {
+                    let w = targets[i]
+                    var plusOutCount = 0
+                    var minusOutCount = 0
+                    let probeFracs: [Float] = [0.25, 0.50, 0.75]
+                    for frac in probeFracs {
+                        let sampleBase = w.start + (w.end - w.start) * frac
+                        let pPlus = sampleBase + w.normal * 0.45
+                        let pMinus = sampleBase - w.normal * 0.45
+                        if grid.isOutdoor(pPlus) && !grid.isOutdoor(pMinus) {
+                            plusOutCount += 1
+                        } else if grid.isOutdoor(pMinus) && !grid.isOutdoor(pPlus) {
+                            minusOutCount += 1
+                        }
+                    }
+                    if plusOutCount >= 2 && minusOutCount == 0 {
+                        targets[i].interiorNormalSide = -1.0 // only -normal points inside
+                    } else if minusOutCount >= 2 && plusOutCount == 0 {
+                        targets[i].interiorNormalSide = 1.0  // only +normal points inside
+                    } else {
+                        targets[i].interiorNormalSide = 0.0  // interior partition wall (both sides inside)
+                    }
+                }
+                self.referenceTargets = targets
+            }
         }
+    }
+    
+    private static func buildIndoorOccupancyGrid(
+        targets: [ReferenceWallTarget],
+        portals: [RefPortal],
+        minB: SIMD2<Float>,
+        maxB: SIMD2<Float>
+    ) -> IndoorOccupancyGrid {
+        let spanX = max(maxB.x - minB.x, 1.0)
+        let spanZ = max(maxB.y - minB.y, 1.0)
+        let cellSize: Float = max(0.20, max(spanX, spanZ) / 150.0)
+        let pad: Float = max(cellSize * 3.0, 0.60)
+        
+        let gMinX = minB.x - pad
+        let gMinZ = minB.y - pad
+        let gMaxX = maxB.x + pad
+        let gMaxZ = maxB.y + pad
+        
+        let cols = max(Int(ceil((gMaxX - gMinX) / cellSize)) + 1, 8)
+        let rows = max(Int(ceil((gMaxZ - gMinZ) / cellSize)) + 1, 8)
+        var cells = [UInt8](repeating: 0, count: cols * rows)
+        
+        func rasterizeSegment(_ a: SIMD2<Float>, _ b: SIMD2<Float>) {
+            let dist = simd_distance(a, b)
+            let steps = max(Int(ceil(dist / (cellSize * 0.35))), 1)
+            var prevC: Int? = nil
+            var prevR: Int? = nil
+            for k in 0...steps {
+                let t = Float(k) / Float(steps)
+                let p = a + (b - a) * t
+                let c = min(max(Int(floor((p.x - gMinX) / cellSize)), 0), cols - 1)
+                let r = min(max(Int(floor((p.y - gMinZ) / cellSize)), 0), rows - 1)
+                cells[r * cols + c] = 1
+                // Keep barrier 4-connected across diagonal steps so exterior BFS cannot leak diagonally
+                if let pc = prevC, let pr = prevR, pc != c && pr != r {
+                    cells[pr * cols + c] = 1
+                }
+                prevC = c
+                prevR = r
+            }
+        }
+        
+        // 1. Rasterize all walls
+        for w in targets {
+            rasterizeSegment(w.start, w.end)
+        }
+        
+        // 2. Seal doorway/window gaps along collinear wall pairs and corner snaps so entrance doors don't leak BFS outside
+        for i in 0..<targets.count {
+            let wA = targets[i]
+            for j in (i + 1)..<targets.count {
+                let wB = targets[j]
+                let isCollinear = abs(simd_dot(wA.tangent, wB.tangent)) > 0.90
+                let ptsA = [wA.start, wA.end]
+                let ptsB = [wB.start, wB.end]
+                for p1 in ptsA {
+                    for p2 in ptsB {
+                        let d = simd_distance(p1, p2)
+                        if d <= 0.45 {
+                            rasterizeSegment(p1, p2)
+                        } else if isCollinear && d <= 1.45 {
+                            let perp = abs(simd_dot(p2 - p1, wA.normal))
+                            if perp <= 0.35 {
+                                rasterizeSegment(p1, p2)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for p in portals {
+            let c = min(max(Int(floor((p.pos.x - gMinX) / cellSize)), 1), cols - 2)
+            let r = min(max(Int(floor((p.pos.y - gMinZ) / cellSize)), 1), rows - 2)
+            for dr in -1...1 {
+                for dc in -1...1 {
+                    cells[(r + dr) * cols + (c + dc)] = 1
+                }
+            }
+        }
+        
+        // 3. 4-connected BFS flood fill from outer padding border to label all outdoor cells (2)
+        var queue: [Int] = []
+        queue.reserveCapacity(cols * 2 + rows * 2)
+        for c in 0..<cols {
+            for r in [0, rows - 1] {
+                let idx = r * cols + c
+                if cells[idx] == 0 {
+                    cells[idx] = 2
+                    queue.append(idx)
+                }
+            }
+        }
+        for r in 0..<rows {
+            for c in [0, cols - 1] {
+                let idx = r * cols + c
+                if cells[idx] == 0 {
+                    cells[idx] = 2
+                    queue.append(idx)
+                }
+            }
+        }
+        
+        var head = 0
+        while head < queue.count {
+            let idx = queue[head]
+            head += 1
+            let r = idx / cols
+            let c = idx % cols
+            if c > 0 {
+                let n = idx - 1
+                if cells[n] == 0 { cells[n] = 2; queue.append(n) }
+            }
+            if c + 1 < cols {
+                let n = idx + 1
+                if cells[n] == 0 { cells[n] = 2; queue.append(n) }
+            }
+            if r > 0 {
+                let n = idx - cols
+                if cells[n] == 0 { cells[n] = 2; queue.append(n) }
+            }
+            if r + 1 < rows {
+                let n = idx + cols
+                if cells[n] == 0 { cells[n] = 2; queue.append(n) }
+            }
+        }
+        
+        var interiorCount = 0
+        for v in cells where v == 0 { interiorCount += 1 }
+        let hasEnclosed = interiorCount >= 6
+        
+        return IndoorOccupancyGrid(
+            minX: hasEnclosed ? gMinX : minB.x - 0.12,
+            minZ: hasEnclosed ? gMinZ : minB.y - 0.12,
+            maxX: hasEnclosed ? gMaxX : maxB.x + 0.12,
+            maxZ: hasEnclosed ? gMaxZ : maxB.y + 0.12,
+            cellSize: cellSize,
+            cols: cols,
+            rows: rows,
+            cells: cells,
+            hasEnclosedInterior: hasEnclosed
+        )
     }
     
     private func makeReferenceTarget(p1: SIMD2<Float>, p2: SIMD2<Float>, thickness: Float = 0.15, name: String) -> ReferenceWallTarget? {
@@ -692,6 +916,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             offset: simd_dot(p1, normal),
             angle: atan2(normal.y, normal.x),
             thickness: thickness,
+            interiorNormalSide: 0.0,
             displayName: name
         )
     }
@@ -877,6 +1102,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
         let portals = referencePortals
         let furniture = referenceFurniture
         let corners = referenceCorners
+        let grid = indoorGrid
         let minB = refMinBounds
         let maxB = refMaxBounds
         let curFloorY = estimatedFloorY
@@ -1018,11 +1244,17 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             }
             guard !topClusters.isEmpty else { return }
             
-            // 3. Candidate Yaws aligning dominant observed normal to reference normals
+            // 3. Candidate Yaws aligning dominant observed normal ONLY to indoor wall faces
             var refNormals: [SIMD2<Float>] = []
             for t in targets {
-                refNormals.append(t.normal)
-                refNormals.append(-t.normal)
+                if t.interiorNormalSide > 0.5 {
+                    refNormals.append(t.normal)
+                } else if t.interiorNormalSide < -0.5 {
+                    refNormals.append(-t.normal)
+                } else {
+                    refNormals.append(t.normal)
+                    refNormals.append(-t.normal)
+                }
             }
             var candidateYaws: [Float] = []
             let obsAng = atan2(topClusters[0].normal.y, topClusters[0].normal.x)
@@ -1086,14 +1318,20 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 var inlierWeight: Float = 0.0
                 var semanticHits = 0
                 
-                // i. Wall geometry agreement with interior wall half-thickness compensation
+                // i. Wall geometry agreement with interior wall half-thickness compensation (ignores exterior faces!)
                 for pt in obsWalls {
                     let wp = mapPt(pt.pos)
                     let wn = rotDir(pt.normal)
                     var bestDistSq: Float = .greatestFiniteMagnitude
                     for ref in targets {
-                        guard abs(simd_dot(wn, ref.normal)) > 0.78 else { continue }
-                        let sideSign: Float = simd_dot(camW - ref.center, ref.normal) >= 0 ? 1.0 : -1.0
+                        let sideSign: Float
+                        if ref.interiorNormalSide != 0 {
+                            guard simd_dot(wn, ref.normal * ref.interiorNormalSide) > 0.78 else { continue }
+                            sideSign = ref.interiorNormalSide
+                        } else {
+                            guard abs(simd_dot(wn, ref.normal)) > 0.78 else { continue }
+                            sideSign = simd_dot(camW - ref.center, ref.normal) >= 0 ? 1.0 : -1.0
+                        }
                         let faceShift = ref.normal * (sideSign * min(ref.thickness * 0.5, 0.14))
                         let dSq = Self.pointToSegmentDistanceSquared(p: wp, a: ref.start + faceShift, b: ref.end + faceShift)
                         bestDistSq = min(bestDistSq, dSq)
@@ -1246,22 +1484,37 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                     let rotClusters = topClusters.map { (center: rotS($0.center), normal: rotDir($0.normal)) }
                     var candidateTrans: [SIMD2<Float>] = []
                     
-                    // A. 2-Wall Corner Intersection
+                    func isStrictlyInsidePerimeter(_ camW: SIMD2<Float>) -> Bool {
+                        if let g = grid {
+                            return g.isStrictlyIndoors(camW)
+                        }
+                        return camW.x >= minB.x - 0.12 && camW.x <= maxB.x + 0.12 &&
+                               camW.y >= minB.y - 0.12 && camW.y <= maxB.y + 0.12
+                    }
+                    
+                    func matchesIndoorFace(obsNorm: SIMD2<Float>, ref: ReferenceWallTarget) -> Bool {
+                        if ref.interiorNormalSide != 0 {
+                            return simd_dot(obsNorm, ref.normal * ref.interiorNormalSide) > 0.85
+                        }
+                        return abs(simd_dot(obsNorm, ref.normal)) > 0.85
+                    }
+                    
+                    // A. 2-Wall Corner Intersection (strictly indoor faces & interior perimeter only!)
                     if rotClusters.count >= 2 {
                         for i in 0..<rotClusters.count {
                             let cA = rotClusters[i]
                             for j in (i + 1)..<rotClusters.count {
                                 let cB = rotClusters[j]
                                 guard abs(cA.normal.x * cB.normal.y - cA.normal.y * cB.normal.x) > 0.35 else { continue }
-                                let matchA = targets.filter { abs(simd_dot(cA.normal, $0.normal)) > 0.85 }
-                                let matchB = targets.filter { abs(simd_dot(cB.normal, $0.normal)) > 0.85 }
+                                let matchA = targets.filter { matchesIndoorFace(obsNorm: cA.normal, ref: $0) }
+                                let matchB = targets.filter { matchesIndoorFace(obsNorm: cB.normal, ref: $0) }
                                 
                                 for rA in matchA {
-                                    let sA: Float = simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0
+                                    let sA: Float = rA.interiorNormalSide != 0 ? rA.interiorNormalSide : (simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0)
                                     let nA = rA.normal * sA
                                     let rhsA = rA.offset * sA - simd_dot(cA.center, nA)
                                     for rB in matchB where rB.id != rA.id {
-                                        let sB: Float = simd_dot(cB.normal, rB.normal) >= 0 ? 1.0 : -1.0
+                                        let sB: Float = rB.interiorNormalSide != 0 ? rB.interiorNormalSide : (simd_dot(cB.normal, rB.normal) >= 0 ? 1.0 : -1.0)
                                         let nB = rB.normal * sB
                                         let rhsB = rB.offset * sB - simd_dot(cB.center, nB)
                                         let det = nA.x * nB.y - nA.y * nB.x
@@ -1269,8 +1522,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                                         let tx = (rhsA * nB.y - rhsB * nA.y) / det
                                         let tz = (nA.x * rhsB - nB.x * rhsA) / det
                                         let camW = SIMD2<Float>(rotCam.x + tx, rotCam.y + tz)
-                                        if camW.x >= minB.x - 0.30 && camW.x <= maxB.x + 0.30 &&
-                                           camW.y >= minB.y - 0.30 && camW.y <= maxB.y + 0.30 {
+                                        if isStrictlyInsidePerimeter(camW) {
                                             candidateTrans.append(SIMD2<Float>(tx, tz))
                                         }
                                     }
@@ -1279,11 +1531,11 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                         }
                     }
                     
-                    // B. 1-Wall sliding fallback
+                    // B. 1-Wall sliding fallback (strictly indoor faces & interior perimeter only!)
                     if candidateTrans.isEmpty {
                         let cA = rotClusters[0]
-                        for rA in targets where abs(simd_dot(cA.normal, rA.normal)) > 0.88 {
-                            let sA: Float = simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0
+                        for rA in targets where matchesIndoorFace(obsNorm: cA.normal, ref: rA) {
+                            let sA: Float = rA.interiorNormalSide != 0 ? rA.interiorNormalSide : (simd_dot(cA.normal, rA.normal) >= 0 ? 1.0 : -1.0)
                             let nA = rA.normal * sA
                             let perpShift = rA.offset * sA - simd_dot(cA.center, nA)
                             let steps = max(Int(rA.length / 0.5), 2)
@@ -1292,8 +1544,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                                 let alongShift = simd_dot(targetPt - cA.center, rA.tangent)
                                 let tr = nA * perpShift + rA.tangent * alongShift
                                 let camW = rotCam + tr
-                                if camW.x >= minB.x - 0.30 && camW.x <= maxB.x + 0.30 &&
-                                   camW.y >= minB.y - 0.30 && camW.y <= maxB.y + 0.30 {
+                                if isStrictlyInsidePerimeter(camW) {
                                     candidateTrans.append(tr)
                                 }
                             }
@@ -1336,16 +1587,23 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 return
             }
             
-            // Fine continuous local polish on top hypothesis
+            // Fine continuous local polish on top hypothesis (strictly staying indoors)
             let dt: Float = 0.06
             let dyaw: Float = 1.5 * .pi / 180.0
             let ds: Float = isPlanMode ? 0.025 : 0.0
             for dx in [-dt, 0, dt] {
                 for dz in [-dt, 0, dt] {
                     for dr in [-dyaw, 0, dyaw] {
+                        let candYaw = Self.normalizeAngle(best.yaw + dr)
+                        let candTx = best.tx + dx
+                        let candTz = best.tz + dz
+                        let scCam = camPosAR * best.scale
+                        let cY = cos(candYaw), sY = sin(candYaw)
+                        let camW = SIMD2<Float>(scCam.x * cY - scCam.y * sY + candTx, scCam.x * sY + scCam.y * cY + candTz)
+                        if let g = grid, !g.isStrictlyIndoors(camW) { continue }
                         let cand = evaluateHypothesis(
-                            yaw: Self.normalizeAngle(best.yaw + dr),
-                            tr: SIMD2<Float>(best.tx + dx, best.tz + dz),
+                            yaw: candYaw,
+                            tr: SIMD2<Float>(candTx, candTz),
                             s: best.scale
                         )
                         if cand.score > best.score + 0.02 {
@@ -1357,6 +1615,10 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
             if ds > 0 {
                 for sDelta in [-ds, ds] {
                     let candS = max(0.75, min(1.30, best.scale + sDelta))
+                    let scCam = camPosAR * candS
+                    let cY = cos(best.yaw), sY = sin(best.yaw)
+                    let camW = SIMD2<Float>(scCam.x * cY - scCam.y * sY + best.tx, scCam.x * sY + scCam.y * cY + best.tz)
+                    if let g = grid, !g.isStrictlyIndoors(camW) { continue }
                     let cand = evaluateHypothesis(yaw: best.yaw, tr: SIMD2<Float>(best.tx, best.tz), s: candS)
                     if cand.score > best.score + 0.04 {
                         best = cand
@@ -1438,6 +1700,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
     private func triggerContinuousPoseRefinement(camPosAR: SIMD2<Float>) {
         let targets = referenceTargets
         guard !targets.isEmpty else { return }
+        let grid = indoorGrid
         
         let vPlaneSnapshots: [(transform: simd_float4x4, width: Float)] = verticalPlaneAnchors.values.map { plane in
             let w: Float
@@ -1474,6 +1737,7 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                 let c = cos(yaw), s = sin(yaw)
                 let camSX = camPosAR.x * sc, camSZ = camPosAR.y * sc
                 let camW = SIMD2<Float>(camSX * c - camSZ * s + tx, camSX * s + camSZ * c + tz)
+                if let g = grid, !g.isStrictlyIndoors(camW) { return -Float.greatestFiniteMagnitude }
                 var total: Float = 0.0
                 for p in pts {
                     let px = p.pos.x * sc, pz = p.pos.y * sc
@@ -1481,8 +1745,14 @@ public class ARIndoorPositionTracker: NSObject, ObservableObject, ARSessionDeleg
                     let wn = SIMD2<Float>(p.normal.x * c - p.normal.y * s, p.normal.x * s + p.normal.y * c)
                     var bestD: Float = .greatestFiniteMagnitude
                     for ref in targets {
-                        guard abs(simd_dot(wn, ref.normal)) > 0.80 else { continue }
-                        let sideSign: Float = simd_dot(camW - ref.center, ref.normal) >= 0 ? 1.0 : -1.0
+                        let sideSign: Float
+                        if ref.interiorNormalSide != 0 {
+                            guard simd_dot(wn, ref.normal * ref.interiorNormalSide) > 0.80 else { continue }
+                            sideSign = ref.interiorNormalSide
+                        } else {
+                            guard abs(simd_dot(wn, ref.normal)) > 0.80 else { continue }
+                            sideSign = simd_dot(camW - ref.center, ref.normal) >= 0 ? 1.0 : -1.0
+                        }
                         let faceShift = ref.normal * (sideSign * min(ref.thickness * 0.5, 0.14))
                         let dSq = Self.pointToSegmentDistanceSquared(p: wp, a: ref.start + faceShift, b: ref.end + faceShift)
                         bestD = min(bestD, dSq)
